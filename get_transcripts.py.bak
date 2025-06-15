@@ -69,98 +69,123 @@ def get_video_id(url):
         return url.split('v=')[1].split('&')[0]
     return None
 
-def format_transcript_text(text, asr_provider='whisper'):
-    """清理转录文本。"""
+def format_transcript_text(text):
+    """清理转录文本：按行去除标点和空格，但保留换行结构。"""
     if not text:
         return ""
     
     import re
     
-    # 对 Whisper 的输出：移除所有标点和空格，按行合并
-    if asr_provider == 'whisper':
-        lines = text.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            line_no_punct = re.sub(r'[^\u4e00-\u9fff\w\s]', '', line)
-            line_no_space = re.sub(r'\s+', '', line_no_punct)
-            if line_no_space:
-                cleaned_lines.append(line_no_space)
-        return '\n'.join(cleaned_lines)
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        # 1. 移除该行的所有标点符号
+        line_no_punct = re.sub(r'[^\u4e00-\u9fff\w\s]', '', line)
+        # 2. 移除该行的所有空格（包括普通空格和全角空格）
+        line_no_space = re.sub(r'\s+', '', line_no_punct)
         
-    # 对 FunASR 的输出：仅清理首尾空白，保留其原生标点和格式
-    elif asr_provider == 'funasr':
-        return text.strip()
-        
-    return text
+        if line_no_space: # 只保留非空行
+            cleaned_lines.append(line_no_space)
+            
+    return '\n'.join(cleaned_lines)
 
-def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
-    """使用指定的ASR引擎从音频转录文稿作为备用方案。"""
-    print(f"--> 备用方案: 正在尝试使用 {args.asr} 从音频转录...")
+def transcribe_with_whisper(video_url, output_dir, base_filename):
+    """使用 Whisper 从音频转录文稿作为备用方案。"""
+    global whisper_model
+    print("--> 备用方案: 正在尝试使用 Whisper 从音频转录...")
 
     audio_filename = f"{base_filename}.mp3"
     audio_path = os.path.join(output_dir, audio_filename)
     
-    # 定义 ASR 模型
-    asr_model = None
-
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
         download_command = [
             'yt-dlp', '-x', '--audio-format', 'mp3', 
-            '--audio-quality', '128K',
+            '--audio-quality', '128K',  # 设置为 128kbps，减少文件大小
             '--output', audio_path, 
             video_url
         ]
         subprocess.run(download_command, check=True, capture_output=True, text=True)
 
-        # 2. 根据选择加载模型并转录
-        transcript_text = ""
-        
-        if args.asr == 'funasr':
-            print(f"    2/3: 首次加载 FunASR 模型 (paraformer-zh)...")
-            from funasr import AutoModel
-            asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c",)
-            print("        正在进行语音识别，这可能需要一些时间...")
-            result = asr_model.generate(input=audio_path)
-            if result and result[0].get("text"):
-                transcript_text = result[0]["text"]
-                print("    -> FunASR 转录完成，已自动添加标点。")
-
-        elif args.asr == 'whisper':
-            print(f"    2/3: 首次加载 Whisper 模型 ({args.whisper_model})...")
+        # 2. 加载模型并转录
+        if whisper_model is None:
+            print("    2/3: 首次加载 Whisper 模型 (medium)...")
+            # 动态导入，仅在需要时
             import whisper
-            asr_model = whisper.load_model(args.whisper_model)
-            print("        正在进行语音识别，这可能需要一些时间...")
-            result = asr_model.transcribe(audio_path, language="zh", fp16=False)
+            whisper_model = whisper.load_model("medium")
+        else:
+            print("    2/3: 使用已加载的 Whisper 模型...")
+        
+        print("        正在进行语音识别，这可能需要一些时间...")
+        
+        # 使用标准转录模式，并利用其原生分段
+        try:
+            result = whisper_model.transcribe(audio_path, language="zh", fp16=False)
+            
             if 'segments' in result and result['segments']:
+                # 直接使用 Whisper 的分段结果
                 transcript_lines = [segment['text'] for segment in result['segments']]
                 transcript_text = '\n'.join(transcript_lines)
                 print(f"    -> 已采用 Whisper 原生分段，共 {len(transcript_lines)} 个片段。")
             else:
+                # 如果没有分段信息，则使用完整文本
                 transcript_text = result['text']
-        
-        if not transcript_text:
-            print("    -> 警告：ASR未能生成任何文本。")
-            return None
+                print("    -> 未找到分段信息，使用完整转录文本。")
 
-        # 3. 强制转换为简体中文和格式化
-        print("    3/3: 后处理转录文本...")
+        except Exception as e:
+            print(f"    -> 标准转录失败: {e}")
+            raise e
+        
+        print("    3/3: 音频转录完成。")
+        
+        # 强制转换为简体中文
         try:
             from opencc import OpenCC
-            cc = OpenCC('t2s')
+            # 使用正确的配置名称（不带 .json 后缀）
+            cc = OpenCC('t2s')  # Traditional to Simplified
             simplified_text = cc.convert(transcript_text)
+            print("    -> 已将文稿转换为简体中文。")
             
-            # 根据 ASR 提供商选择不同的格式化策略
-            formatted_text = format_transcript_text(simplified_text, args.asr)
-            print(f"    -> 已完成文本格式化 ({args.asr} 模式)。")
+            # 格式化文本，去掉标点符号并换行
+            formatted_text = format_transcript_text(simplified_text)
+            print("    -> 已格式化文稿，去除标点并分行。")
+            return formatted_text
+            
+        except ImportError:
+            print("    -> 警告: 'opencc-python-reimplemented' 未安装，无法转换为简体中文。")
+            print("       请运行 'pip install -r requirements.txt'。将返回原始转录文本。")
+            # 即使没有转换，也要格式化
+            formatted_text = format_transcript_text(transcript_text)
             return formatted_text
         except Exception as e:
-            print(f"    -> 警告: 文本后处理失败: {e}。将返回原始转录文本。")
-            return transcript_text
+            print(f"    -> 警告: 转换为简体中文时出错: {e}。将返回原始转录文本。")
+            # 如果转换失败，手动尝试一些常见的繁简转换
+            try:
+                # 简单的手动繁简转换（备用方案）
+                simple_convert_map = {
+                    '這': '这', '個': '个', '們': '们', '來': '来', '時': '时',
+                    '會': '会', '說': '说', '現': '现', '過': '过', '開': '开',
+                    '關': '关', '問': '问', '題': '题', '還': '还', '見': '见',
+                    '實': '实', '際': '际', '經': '经', '應': '应', '該': '该'
+                }
+                converted_text = transcript_text
+                for trad, simp in simple_convert_map.items():
+                    converted_text = converted_text.replace(trad, simp)
+                formatted_text = format_transcript_text(converted_text)
+                print("    -> 使用备用方案进行了基础繁简转换。")
+                return formatted_text
+            except:
+                # 最后的备用方案，直接格式化原文
+                formatted_text = format_transcript_text(transcript_text)
+                return formatted_text
 
+    except subprocess.CalledProcessError as e:
+        print(f"--> [Whisper 备用方案失败] 下载音频时出错: {e.stderr}")
+        return None
     except Exception as e:
-        print(f"--> [{args.asr} 备用方案失败] 发生未知错误: {e}")
+        print(f"--> [Whisper 备用方案失败] 转录时发生未知错误: {e}")
         return None
     finally:
         # 4. 清理临时音频文件
@@ -212,9 +237,9 @@ def main(args):
 
         except Exception as e:
             print(f"无法获取官方文稿: {str(e).strip()}")
-            # 官方文稿获取失败，启动 ASR 备用方案
+            # 官方文稿获取失败，启动 Whisper 备用方案
             base_filename_for_audio = f"{str(index + 1).zfill(num_digits)}_{sanitized_title}"
-            transcript_text = transcribe_audio_fallback(link, args.output_dir, base_filename_for_audio, args)
+            transcript_text = transcribe_with_whisper(link, args.output_dir, base_filename_for_audio)
             if transcript_text:
                 is_from_whisper = True
 
@@ -227,7 +252,7 @@ def main(args):
             markdown_content += f"**原始链接:** <{link}>\n\n"
             
             if is_from_whisper:
-                markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
+                markdown_content += "> **注意**: 本文稿由语音识别生成，可能存在错误。\n\n"
             
             markdown_content += "---\n\n"
             markdown_content += transcript_text
@@ -254,20 +279,6 @@ if __name__ == "__main__":
         type=str, 
         default='transcripts', 
         help='保存文稿文件的目录路径 (默认为: transcripts)。'
-    )
-    parser.add_argument(
-        '--asr',
-        type=str,
-        default='funasr',
-        choices=['funasr', 'whisper'],
-        help='选择使用的语音识别引擎 (默认为: funasr)。'
-    )
-    parser.add_argument(
-        '--whisper_model',
-        type=str,
-        default='medium',
-        choices=['tiny', 'base', 'small', 'medium', 'large-v3'],
-        help='当选择 whisper 引擎时，指定使用的模型大小 (默认为: medium)。'
     )
     
     args = parser.parse_args()
