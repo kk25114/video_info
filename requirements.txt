@@ -1,0 +1,7 @@
+requests
+youtube-transcript-api
+torch
+torchaudio
+openai-whisper
+opencc-python-reimplemented
+funasr 
