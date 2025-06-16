@@ -6,8 +6,8 @@ import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# 全局变量，用于懒加载 Whisper 模型
-whisper_model = None
+# 全局变量，用于懒加载 ASR 模型
+asr_model = None
 
 def check_dependencies():
     """检查脚本所需的外部命令行工具是否存在。"""
@@ -95,14 +95,12 @@ def format_transcript_text(text, asr_provider='whisper'):
 
 def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     """使用指定的ASR引擎从音频转录文稿作为备用方案。"""
+    global asr_model
     print(f"--> 备用方案: 正在尝试使用 {args.asr} 从音频转录...")
 
     audio_filename = f"{base_filename}.mp3"
     audio_path = os.path.join(output_dir, audio_filename)
     
-    # 定义 ASR 模型
-    asr_model = None
-
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
@@ -118,19 +116,28 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         transcript_text = ""
         
         if args.asr == 'funasr':
-            print(f"    2/3: 首次加载 FunASR 模型 (paraformer-zh)...")
-            from funasr import AutoModel
-            asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c",)
+            if asr_model is None:
+                print(f"    2/3: 首次加载 FunASR 模型 (paraformer-zh)...")
+                from funasr import AutoModel
+                asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c",)
+            
             print("        正在进行语音识别，这可能需要一些时间...")
             result = asr_model.generate(input=audio_path)
-            if result and result[0].get("text"):
-                transcript_text = result[0]["text"]
-                print("    -> FunASR 转录完成，已自动添加标点。")
+            
+            if result and result[0].get("sentence_info"):
+                sentences = [s['text'] for s in result[0]['sentence_info']]
+                transcript_text = '\n'.join(sentences)
+                print(f"    -> FunASR 转录完成，并已按句子分段 (共 {len(sentences)} 句)。")
+            elif result and result[0].get("text"): # Fallback if sentence_info is not available
+                transcript_text = result[0]['text']
+                print("    -> FunASR 转录完成 (单段文本)，已自动添加标点。")
 
         elif args.asr == 'whisper':
-            print(f"    2/3: 首次加载 Whisper 模型 ({args.whisper_model})...")
-            import whisper
-            asr_model = whisper.load_model(args.whisper_model)
+            if asr_model is None:
+                print(f"    2/3: 首次加载 Whisper 模型 ({args.whisper_model})...")
+                import whisper
+                asr_model = whisper.load_model(args.whisper_model)
+
             print("        正在进行语音识别，这可能需要一些时间...")
             result = asr_model.transcribe(audio_path, language="zh", fp16=False)
             if 'segments' in result and result['segments']:
@@ -176,14 +183,21 @@ def main(args):
         print("未获取到任何视频链接，程序退出。")
         return
 
-    if os.path.exists(args.output_dir):
-        print(f"发现已存在的目录 '{args.output_dir}'，正在删除...")
-        shutil.rmtree(args.output_dir)
-    
-    os.makedirs(args.output_dir)
+    # 确保输出目录存在，而不是删除重建
+    os.makedirs(args.output_dir, exist_ok=True)
+    print(f"文稿将保存在: {args.output_dir}")
+
+    # 加载已处理的视频ID
+    processed_log_path = os.path.join(args.output_dir, 'processed_videos.log')
+    processed_ids = set()
+    if os.path.exists(processed_log_path):
+        with open(processed_log_path, 'r', encoding='utf-8') as f:
+            processed_ids = set(line.strip() for line in f)
+        print(f"已加载 {len(processed_ids)} 条已处理视频的记录。")
 
     total_videos = len(video_links)
     num_digits = len(str(total_videos))
+    new_videos_processed = 0
 
     for index, link in enumerate(video_links):
         video_id = get_video_id(link)
@@ -191,7 +205,13 @@ def main(args):
             print(f"无法从链接中解析视频 ID: {link}")
             continue
 
-        print(f"\n正在处理视频 ({index + 1}/{total_videos}): {link}")
+        # 检查视频是否已被处理
+        if video_id in processed_ids:
+            print(f"发现已处理过的视频 ID: {video_id}。")
+            print("假设列表按最新到最旧排序，停止处理，以避免重复工作。")
+            break
+
+        print(f"\n正在处理新视频 ({index + 1}/{total_videos}): {link}")
 
         video_title = get_video_title(link)
         
@@ -235,9 +255,21 @@ def main(args):
             with open(transcript_file_path, 'w', encoding='utf-8') as tf:
                 tf.write(markdown_content)
             
+            # 将新处理完的视频ID记录到日志
+            with open(processed_log_path, 'a', encoding='utf-8') as log_file:
+                log_file.write(f"{video_id}\n")
+            
             print(f"已将 '{display_title}' 的文稿保存至: {transcript_file_path}")
+            new_videos_processed += 1
         else:
             print(f"处理视频 {link} 失败，所有方法均未能获取文稿。")
+    
+    print("\n--- 任务总结 ---")
+    if new_videos_processed > 0:
+        print(f"成功处理了 {new_videos_processed} 个新视频。")
+    else:
+        print("没有发现需要处理的新视频。")
+    print("----------------")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
