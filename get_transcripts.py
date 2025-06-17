@@ -5,6 +5,7 @@ import requests
 import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
+from datetime import datetime
 
 # 全局变量，用于懒加载 ASR 模型
 asr_model = None
@@ -22,13 +23,27 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
-def get_video_links_from_url(youtube_url):
-    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。"""
+def get_video_links_from_url(youtube_url, output_dir):
+    """
+    使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。
+    如果检测到上次处理的日期，则只获取该日期之后的视频。
+    """
     print(f"正在从目标链接获取所有视频 URL: {youtube_url}")
+    
+    command = ['yt-dlp', '--flat-playlist', '--get-url', youtube_url]
+    date_log_path = os.path.join(output_dir, 'last_processed_date.log')
+
+    if os.path.exists(date_log_path):
+        with open(date_log_path, 'r', encoding='utf-8') as f:
+            last_date = f.read().strip()
+            if last_date:
+                print(f"检测到上次处理到日期 {last_date}，将只获取此日期之后的视频。")
+                command.extend(['--dateafter', last_date])
+
     try:
         # 执行 yt-dlp 命令并捕获输出
         result = subprocess.run(
-            ['yt-dlp', '--flat-playlist', '--get-url', youtube_url],
+            command,
             capture_output=True,
             text=True,
             check=True
@@ -51,6 +66,18 @@ def sanitize_filename(title):
     sanitized = re.sub(r'[\\/*?:"<>|]', "", title)
     sanitized = sanitized.replace(' ', '_')
     return sanitized[:100]
+
+def get_video_upload_date(video_url):
+    """使用 yt-dlp 获取视频的上传日期 (格式: YYYYMMDD)。"""
+    try:
+        result = subprocess.run(
+            ['yt-dlp', '--print', '%(upload_date)s', video_url],
+            capture_output=True, text=True, check=True
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        # 不打印错误，因为这可能在主流程中只是一个尝试
+        return None
 
 def get_video_title(video_url):
     """使用 YouTube oEmbed API 获取视频标题。"""
@@ -161,14 +188,33 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             # 根据 ASR 提供商选择不同的格式化策略
             formatted_text = format_transcript_text(simplified_text, args.asr)
             print(f"    -> 已完成文本格式化 ({args.asr} 模式)。")
+            # 返回处理成功的文本
             return formatted_text
         except Exception as e:
             print(f"    -> 警告: 文本后处理失败: {e}。将返回原始转录文本。")
             return transcript_text
 
+    except subprocess.CalledProcessError as e:
+        # 智能判断 yt-dlp 的错误类型
+        error_output = e.stderr.lower()
+        permanent_error_keywords = [
+            'video unavailable', 'private video', 'members-only',
+            'this video is private', 'this video is unavailable',
+            'has been removed', 'login required', 'copyright',
+            'video has been deleted', 'user has closed their account'
+        ]
+        is_permanent = any(keyword in error_output for keyword in permanent_error_keywords)
+
+        if is_permanent:
+            print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {e.stderr.strip()}")
+            return "permanent_failure" # 返回一个特殊信号
+        else:
+            print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {e.stderr.strip()}")
+            return None # 返回 None 代表临时失败
+
     except Exception as e:
-        print(f"--> [{args.asr} 备用方案失败] 发生未知错误: {e}")
-        return None
+        print(f"--> [{args.asr} 备用方案失败] 发生未知错误，将可重试: {e}")
+        return None # 其他所有错误都视为临时性
     finally:
         # 4. 清理临时音频文件
         if os.path.exists(audio_path):
@@ -195,7 +241,8 @@ def main(args):
     """主执行函数。"""
     check_dependencies()
     
-    video_links = get_video_links_from_url(args.youtube_url)
+    # 传入 output_dir 以便进行日期筛选
+    video_links = get_video_links_from_url(args.youtube_url, args.output_dir)
     if not video_links:
         print("未获取到任何视频链接，程序退出。")
         return
@@ -210,7 +257,17 @@ def main(args):
     if os.path.exists(processed_log_path):
         with open(processed_log_path, 'r', encoding='utf-8') as f:
             processed_ids = set(line.strip() for line in f)
-        print(f"已加载 {len(processed_ids)} 条已处理视频的记录。")
+    
+    # 加载已失败的视频ID
+    failed_log_path = os.path.join(args.output_dir, 'failed_videos.log')
+    failed_ids = set()
+    if os.path.exists(failed_log_path):
+        with open(failed_log_path, 'r', encoding='utf-8') as f:
+            failed_ids = set(line.strip() for line in f)
+
+    # 合并成一个总的跳过列表
+    skip_ids = processed_ids.union(failed_ids)
+    print(f"已加载 {len(processed_ids)} 条成功记录和 {len(failed_ids)} 条失败记录。共跳过 {len(skip_ids)} 个视频。")
 
     # 高效筛选新视频
     # 假设 yt-dlp 返回的列表是按最新到最旧排序的
@@ -224,82 +281,109 @@ def main(args):
         
         # 一旦遇到已经处理过的视频，就停止查找
         # 因为列表是按时间倒序的，这之后都是旧视频
-        if video_id in processed_ids:
-            print("检测到已处理过的视频，扫描停止。")
+        if video_id in skip_ids:
+            print("检测到已处理或已失败的视频，扫描停止。")
             break
         
         new_video_links.append(link)
     
+    date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
+
     if not new_video_links:
-        print("\n没有需要处理的新视频。程序退出。")
-        return
+        print("\n没有发现需要处理的新视频。")
+        # 将断点日期更新为今天，避免下次从一个很旧的日期开始扫描
+        current_date_str = datetime.now().strftime('%Y%m%d')
+        with open(date_log_path, 'w', encoding='utf-8') as f:
+            f.write(current_date_str)
+        print(f"--> 已将本频道的最后处理日期更新为今日: {current_date_str}")
+    else:
+        # 正常处理流程
+        print(f"\n共发现 {len(new_video_links)} 个新视频。")
 
-    print(f"\n共发现 {len(new_video_links)} 个新视频。")
-
-    # 反转列表，确保从最旧的视频开始处理，使得最新的视频获得最大的序号
-    new_video_links.reverse()
-    print("已将视频列表反转，将从最旧的视频开始处理。")
-    
-    # 确定新文件的起始编号
-    next_file_index = get_next_file_index(args.output_dir)
-    print(f"将从序号 {next_file_index:04d} 开始为新文件命名。")
-
-    total_new_videos = len(new_video_links)
-    for current_progress, link in enumerate(new_video_links):
-        video_id = get_video_id(link)
-        # 视频ID在此处一定存在且是新的，因为前面已经筛选过
-
-        print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
-
-        video_title = get_video_title(link)
+        # 反转列表，确保从最旧的视频开始处理，使得最新的视频获得最大的序号
+        new_video_links.reverse()
+        print("已将视频列表反转，将从最旧的视频开始处理。")
         
-        if video_title:
-            sanitized_title = sanitize_filename(video_title)
-        else:
-            print(f"--> 警告: 无法获取视频标题。将使用视频 ID '{video_id}' 作为备用文件名。")
-            sanitized_title = video_id
+        # 确定新文件的起始编号
+        next_file_index = get_next_file_index(args.output_dir)
+        print(f"将从序号 {next_file_index:04d} 开始为新文件命名。")
 
-        transcript_text = None
-        is_from_asr = False
+        total_new_videos = len(new_video_links)
+        for current_progress, link in enumerate(new_video_links):
+            video_id = get_video_id(link)
+            # 视频ID在此处一定存在且是新的，因为前面已经筛选过
+
+            print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
+
+            video_title = get_video_title(link)
+            
+            if video_title:
+                sanitized_title = sanitize_filename(video_title)
+            else:
+                print(f"--> 警告: 无法获取视频标题。将使用视频 ID '{video_id}' 作为备用文件名。")
+                sanitized_title = video_id
+
+            transcript_text = None
+            is_from_asr = False
+            
+            try:
+                # 优先尝试获取官方字幕
+                transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['zh-Hans', 'zh-CN', 'zh', 'en'])
+                transcript_text = '\n\n'.join([item['text'] for item in transcript_list])
+                print(f"成功获取官方文稿。")
+
+            except Exception as e:
+                print(f"无法获取官方文稿: {str(e).strip()}")
+                # 官方文稿获取失败，启动 ASR 备用方案
+                # 使用一个临时的、唯一的名称来下载音频，避免冲突
+                base_filename_for_audio = f"temp_audio_{video_id}"
+                transcript_text = transcribe_audio_fallback(link, args.output_dir, base_filename_for_audio, args) # transcript_text can now be string, None, or "permanent_failure"
+                if transcript_text and transcript_text != "permanent_failure":
+                    is_from_asr = True
+
+            # 根据 transcript_text 的最终状态决定如何操作
+            if transcript_text and transcript_text != "permanent_failure":
+                # 成功获取文稿
+                filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
+                transcript_file_path = os.path.join(args.output_dir, filename)
+                
+                display_title = video_title if video_title else f"ID: {video_id}"
+                markdown_content = f"# {display_title}\n\n"
+                markdown_content += f"**原始链接:** <{link}>\n\n"
+                
+                if is_from_asr:
+                    markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
+
+                markdown_content += transcript_text
+                
+                with open(transcript_file_path, 'w', encoding='utf-8') as f:
+                    f.write(markdown_content)
+                print(f"成功保存文稿: {filename}")
+
+                # 记录已处理的ID并递增文件序号
+                with open(processed_log_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{video_id}\n")
+                next_file_index += 1
+            else:
+                # 永久性失败或临时性失败
+                if transcript_text == "permanent_failure":
+                    print(f"处理失败，检测到永久性错误: {link}")
+                    # 将失败的ID记录下来，下次不再尝试
+                    with open(failed_log_path, 'a', encoding='utf-8') as f:
+                        f.write(f"{video_id}\n")
+                    print(f"--> 已将失败的视频ID '{video_id}' 记录到失败日志中。")
+                else: # transcript_text is None
+                    print(f"处理失败，检测到临时性错误，将可重试: {link}")
+
+        # 在所有视频处理完毕后，更新该频道的最后处理日期
+        newest_video_link = new_video_links[-1]
+        print(f"\n正在为最新处理的视频获取上传日期: {newest_video_link}")
+        upload_date = get_video_upload_date(newest_video_link)
         
-        try:
-            # 优先尝试获取官方字幕
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['zh-Hans', 'zh-CN', 'zh', 'en'])
-            transcript_text = '\n\n'.join([item['text'] for item in transcript_list])
-            print(f"成功获取官方文稿。")
-
-        except Exception as e:
-            print(f"无法获取官方文稿: {str(e).strip()}")
-            # 官方文稿获取失败，启动 ASR 备用方案
-            # 使用一个临时的、唯一的名称来下载音频，避免冲突
-            base_filename_for_audio = f"temp_audio_{video_id}"
-            transcript_text = transcribe_audio_fallback(link, args.output_dir, base_filename_for_audio, args)
-            if transcript_text:
-                is_from_asr = True
-
-        if transcript_text:
-            filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
-            transcript_file_path = os.path.join(args.output_dir, filename)
-            
-            display_title = video_title if video_title else f"ID: {video_id}"
-            markdown_content = f"# {display_title}\n\n"
-            markdown_content += f"**原始链接:** <{link}>\n\n"
-            
-            if is_from_asr:
-                markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
-
-            markdown_content += transcript_text
-            
-            with open(transcript_file_path, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
-            print(f"成功保存文稿: {filename}")
-
-            # 记录已处理的ID并递增文件序号
-            with open(processed_log_path, 'a', encoding='utf-8') as f:
-                f.write(f"{video_id}\n")
-            next_file_index += 1
-        else:
-            print(f"处理失败，未能获取视频文稿: {link}")
+        if upload_date:
+            with open(date_log_path, 'w', encoding='utf-8') as f:
+                f.write(upload_date)
+            print(f"--> 已更新本频道的最后处理日期为: {upload_date}")
 
     # 如果指定了 --auto-commit，则在最后调用外部脚本执行 Git 操作
     if args.auto_commit:
