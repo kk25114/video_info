@@ -174,6 +174,23 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         if os.path.exists(audio_path):
             os.remove(audio_path)
 
+def get_next_file_index(output_dir):
+    """
+    扫描输出目录，根据 'XXXX_title.md' 命名方案查找现有的最大文件序号。
+    返回下一个要使用的索引。
+    """
+    max_index = 0
+    if not os.path.isdir(output_dir):
+        return 1  # 如果目录不存在，从 1 开始
+
+    for filename in os.listdir(output_dir):
+        match = re.match(r'^(\d+)_.*\.md$', filename)
+        if match:
+            current_index = int(match.group(1))
+            if current_index > max_index:
+                max_index = current_index
+    return max_index + 1
+
 def main(args):
     """主执行函数。"""
     check_dependencies()
@@ -183,7 +200,7 @@ def main(args):
         print("未获取到任何视频链接，程序退出。")
         return
 
-    # 确保输出目录存在，而不是删除重建
+    # 确保输出目录存在
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"文稿将保存在: {args.output_dir}")
 
@@ -195,23 +212,38 @@ def main(args):
             processed_ids = set(line.strip() for line in f)
         print(f"已加载 {len(processed_ids)} 条已处理视频的记录。")
 
-    total_videos = len(video_links)
-    num_digits = len(str(total_videos))
-    new_videos_processed = 0
-
-    for index, link in enumerate(video_links):
+    # 筛选出尚未处理的新视频
+    new_video_links = []
+    for link in video_links:
         video_id = get_video_id(link)
-        if not video_id:
-            print(f"无法从链接中解析视频 ID: {link}")
-            continue
+        if video_id and video_id not in processed_ids:
+            new_video_links.append(link)
+        else:
+            if video_id:
+                print(f"已跳过 (已处理): {link}")
+            else:
+                print(f"无法解析视频ID，已跳过: {link}")
+    
+    if not new_video_links:
+        print("\n没有需要处理的新视频。程序退出。")
+        return
 
-        # 检查视频是否已被处理
-        if video_id in processed_ids:
-            print(f"发现已处理过的视频 ID: {video_id}。")
-            print("假设列表按最新到最旧排序，停止处理，以避免重复工作。")
-            break
+    print(f"\n共发现 {len(new_video_links)} 个新视频。")
 
-        print(f"\n正在处理新视频 ({index + 1}/{total_videos}): {link}")
+    # 反转列表，确保从最旧的视频开始处理，使得最新的视频获得最大的序号
+    new_video_links.reverse()
+    print("已将视频列表反转，将从最旧的视频开始处理。")
+    
+    # 确定新文件的起始编号
+    next_file_index = get_next_file_index(args.output_dir)
+    print(f"将从序号 {next_file_index:04d} 开始为新文件命名。")
+
+    total_new_videos = len(new_video_links)
+    for current_progress, link in enumerate(new_video_links):
+        video_id = get_video_id(link)
+        # 视频ID在此处一定存在且是新的，因为前面已经筛选过
+
+        print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
 
         video_title = get_video_title(link)
         
@@ -222,7 +254,7 @@ def main(args):
             sanitized_title = video_id
 
         transcript_text = None
-        is_from_whisper = False
+        is_from_asr = False
         
         try:
             # 优先尝试获取官方字幕
@@ -233,54 +265,65 @@ def main(args):
         except Exception as e:
             print(f"无法获取官方文稿: {str(e).strip()}")
             # 官方文稿获取失败，启动 ASR 备用方案
-            base_filename_for_audio = f"{str(index + 1).zfill(num_digits)}_{sanitized_title}"
+            # 使用一个临时的、唯一的名称来下载音频，避免冲突
+            base_filename_for_audio = f"temp_audio_{video_id}"
             transcript_text = transcribe_audio_fallback(link, args.output_dir, base_filename_for_audio, args)
             if transcript_text:
-                is_from_whisper = True
+                is_from_asr = True
 
         if transcript_text:
-            filename = f"{str(index + 1).zfill(num_digits)}_{sanitized_title}.md"
+            filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
             transcript_file_path = os.path.join(args.output_dir, filename)
             
             display_title = video_title if video_title else f"ID: {video_id}"
             markdown_content = f"# {display_title}\n\n"
             markdown_content += f"**原始链接:** <{link}>\n\n"
             
-            if is_from_whisper:
+            if is_from_asr:
                 markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
-            
-            markdown_content += "---\n\n"
+
             markdown_content += transcript_text
             
-            with open(transcript_file_path, 'w', encoding='utf-8') as tf:
-                tf.write(markdown_content)
-            
-            # 将新处理完的视频ID记录到日志
-            with open(processed_log_path, 'a', encoding='utf-8') as log_file:
-                log_file.write(f"{video_id}\n")
-            
-            print(f"已将 '{display_title}' 的文稿保存至: {transcript_file_path}")
-            new_videos_processed += 1
-        else:
-            print(f"处理视频 {link} 失败，所有方法均未能获取文稿。")
-    
-    print("\n--- 任务总结 ---")
-    if new_videos_processed > 0:
-        print(f"成功处理了 {new_videos_processed} 个新视频。")
-    else:
-        print("没有发现需要处理的新视频。")
-    print("----------------")
+            with open(transcript_file_path, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            print(f"成功保存文稿: {filename}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description='一键从 YouTube 频道/播放列表链接下载所有视频的文稿，并存为 Markdown 文件。',
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument(
-        'youtube_url', 
-        type=str, 
-        help='YouTube 频道、播放列表或单个视频的 URL。\n例如:\n"https://www.youtube.com/@username/videos"\n"https://www.youtube.com/playlist?list=PLxxxxxxxxxxxxxxx"'
-    )
+            # 记录已处理的ID并递增文件序号
+            with open(processed_log_path, 'a', encoding='utf-8') as f:
+                f.write(f"{video_id}\n")
+            next_file_index += 1
+        else:
+            print(f"处理失败，未能获取视频文稿: {link}")
+
+    # 如果指定了 --auto-commit，则在最后调用外部脚本执行 Git 操作
+    if args.auto_commit:
+        print("\n-----------------------------------------")
+        print("🚀 检测到 --auto-commit，准备调用提交脚本...")
+        
+        commit_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auto_commit.sh')
+        
+        if not os.path.exists(commit_script_path):
+            print(f"错误: 提交脚本 'auto_commit.sh' 未在目录中找到。")
+            return
+
+        try:
+            # 执行外部的提交脚本
+            result = subprocess.run([commit_script_path], check=True, capture_output=True, text=True)
+            # 打印提交脚本的输出
+            print(result.stdout)
+        except FileNotFoundError:
+            print(f"\n错误: 无法执行 '{commit_script_path}'。请确保它有执行权限 (chmod +x auto_commit.sh)。")
+        except subprocess.CalledProcessError as e:
+            print(f"\n错误: Git 同步脚本执行失败。")
+            print(f"  返回码: {e.returncode}")
+            print(f"  --- 脚本标准输出 ---\n{e.stdout.strip()}")
+            print(f"  --- 脚本错误输出 ---\n{e.stderr.strip()}")
+        except Exception as e:
+            print(f"\n一个未知错误导致 Git 同步失败: {e}")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="下载 YouTube 视频的文稿。")
+    parser.add_argument("youtube_url", help="YouTube 视频、播放列表或频道的 URL。")
     parser.add_argument(
         '--output_dir', 
         type=str, 
@@ -302,5 +345,8 @@ if __name__ == "__main__":
         help='当选择 whisper 引擎时，指定使用的模型大小 (默认为: medium)。'
     )
     
+    # 新增的参数
+    parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
+
     args = parser.parse_args()
     main(args)
