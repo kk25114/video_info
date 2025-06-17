@@ -212,17 +212,23 @@ def main(args):
             processed_ids = set(line.strip() for line in f)
         print(f"已加载 {len(processed_ids)} 条已处理视频的记录。")
 
-    # 筛选出尚未处理的新视频
+    # 高效筛选新视频
+    # 假设 yt-dlp 返回的列表是按最新到最旧排序的
+    print("\n正在从视频列表中查找新内容...")
     new_video_links = []
     for link in video_links:
         video_id = get_video_id(link)
-        if video_id and video_id not in processed_ids:
-            new_video_links.append(link)
-        else:
-            if video_id:
-                print(f"已跳过 (已处理): {link}")
-            else:
-                print(f"无法解析视频ID，已跳过: {link}")
+        if not video_id:
+            print(f"无法解析视频ID，已跳过: {link}")
+            continue
+        
+        # 一旦遇到已经处理过的视频，就停止查找
+        # 因为列表是按时间倒序的，这之后都是旧视频
+        if video_id in processed_ids:
+            print("检测到已处理过的视频，扫描停止。")
+            break
+        
+        new_video_links.append(link)
     
     if not new_video_links:
         print("\n没有需要处理的新视频。程序退出。")
