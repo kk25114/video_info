@@ -5,7 +5,6 @@ import requests
 import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
-from datetime import datetime
 
 # 全局变量，用于懒加载 ASR 模型
 asr_model = None
@@ -23,29 +22,29 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
-def get_channel_uploads_url(youtube_url):
-    """从任意频道URL中，解析出其RSS Feed URL，这是精确筛选的最佳方式。"""
+def get_video_links_from_url(youtube_url):
+    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。"""
+    print(f"正在从目标链接获取所有视频 URL: {youtube_url}")
     try:
-        # 使用 yt-dlp 提取频道 ID
-        print(f"--> 正在从 {youtube_url} 解析频道ID...")
-        id_result = subprocess.run(
-            ['yt-dlp', '--print', 'channel_id', youtube_url],
-            capture_output=True, text=True, check=True, timeout=180
+        command = ['yt-dlp', '--flat-playlist', '--get-url', youtube_url]
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=180
         )
-        channel_id = id_result.stdout.strip()
-        
-        if channel_id and channel_id.startswith('UC'):
-            # 构建 RSS Feed URL
-            rss_url = f'https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}'
-            print(f"--> 已成功转换为RSS Feed URL: {rss_url}")
-            return rss_url
+        links = result.stdout.strip().splitlines()
+        if not links:
+            print("警告: 未能从提供的链接中找到任何视频。请检查链接是否有效。")
         else:
-            print(f"--> 警告: 未能从 {youtube_url} 解析出有效的频道ID (UC...)。将使用原始URL。")
-            return youtube_url
-
+            print(f"成功找到 {len(links)} 个视频链接。")
+        return links
+    except subprocess.TimeoutExpired:
+        print("错误: yt-dlp 获取视频列表超时 (180秒)。")
+        return []
+    except subprocess.CalledProcessError as e:
+        print(f"执行 yt-dlp 时出错。请确保链接有效，且 yt-dlp 是最新版本。\n错误详情: {e.stderr.strip()}")
+        return []
     except Exception as e:
-        print(f"--> 警告: 自动转换频道URL失败，将使用原始URL。错误: {e}")
-        return youtube_url
+        print(f"获取视频链接时发生未知错误: {e}")
+        return []
 
 def sanitize_filename(title):
     """将字符串清理为有效的文件名。"""
@@ -227,56 +226,21 @@ def main(args):
     """主执行函数。"""
     check_dependencies()
     
-    # 1. 优先将频道URL转换为对筛选更友好的RSS Feed URL
-    target_url = get_channel_uploads_url(args.youtube_url)
-
-    # 2. 检查日期日志并构建最终的yt-dlp命令
-    command = ['yt-dlp', '--flat-playlist', '--get-url', target_url]
-    date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
-    if os.path.exists(date_log_path):
-        with open(date_log_path, 'r', encoding='utf-8') as f:
-            last_date = f.read().strip()
-            if last_date:
-                print(f"检测到上次处理到日期 {last_date}，将使用过滤器筛选此日期之后的视频。")
-                # 使用 --match-filter 进行精确筛选
-                command.extend(['--match-filter', f"upload_date > {last_date}"])
-
-    # 3. 执行命令获取视频链接
-    print(f"正在执行yt-dlp命令: {' '.join(command)}")
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=180)
-        video_links = result.stdout.strip().splitlines()
-        if not video_links:
-            print("没有找到需要处理的新视频。")
-            return
-        else:
-            print(f"成功找到 {len(video_links)} 个新视频链接。")
-    except subprocess.TimeoutExpired:
-        print("错误: yt-dlp 获取视频列表超时。")
-        return
-    except subprocess.CalledProcessError as e:
-        # 当过滤器没有匹配任何内容时，yt-dlp会返回1，这不是一个真正的错误
-        if "does not pass filter" in e.stderr:
-             print("没有找到符合条件的新视频。")
-             return
-        print(f"错误: yt-dlp 执行失败。\n{e.stderr.strip()}")
-        return
-    except Exception as e:
-        print(f"获取视频链接时发生未知错误: {e}")
+    video_links = get_video_links_from_url(args.youtube_url)
+    if not video_links:
+        print("未获取到任何视频链接，程序退出。")
         return
 
     # 确保输出目录存在
     os.makedirs(args.output_dir, exist_ok=True)
-    print(f"文稿将保存在: {args.output_dir}")
-
-    # 加载已处理的视频ID
+    
+    # 加载已处理和已失败的视频ID
     processed_log_path = os.path.join(args.output_dir, 'processed_videos.log')
     processed_ids = set()
     if os.path.exists(processed_log_path):
         with open(processed_log_path, 'r', encoding='utf-8') as f:
             processed_ids = set(line.strip() for line in f)
     
-    # 加载已失败的视频ID
     failed_log_path = os.path.join(args.output_dir, 'failed_videos.log')
     failed_ids = set()
     if os.path.exists(failed_log_path):
@@ -288,7 +252,6 @@ def main(args):
     print(f"已加载 {len(processed_ids)} 条成功记录和 {len(failed_ids)} 条失败记录。共跳过 {len(skip_ids)} 个视频。")
 
     # 高效筛选新视频
-    # 假设 yt-dlp 返回的列表是按最新到最旧排序的
     print("\n正在从视频列表中查找新内容...")
     new_video_links = []
     for link in video_links:
@@ -297,8 +260,6 @@ def main(args):
             print(f"无法解析视频ID，已跳过: {link}")
             continue
         
-        # 一旦遇到已经处理过的视频，就停止查找
-        # 因为列表是按时间倒序的，这之后都是旧视频
         if video_id in skip_ids:
             print("检测到已处理或已失败的视频，扫描停止。")
             break
@@ -309,7 +270,6 @@ def main(args):
         print("\n没有发现需要处理的新视频。程序退出。")
         return
 
-    # 正常处理流程
     print(f"\n共发现 {len(new_video_links)} 个新视频。")
 
     # 反转列表，确保从最旧的视频开始处理，使得最新的视频获得最大的序号
