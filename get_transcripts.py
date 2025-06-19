@@ -206,7 +206,7 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             if asr_model is None:
                 print(f"    2/3: 首次加载 FunASR 模型 (paraformer-zh)...")
                 from funasr import AutoModel
-                asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c",)
+                asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c", disable_update=True)
             
             print("        正在进行语音识别，这可能需要一些时间...")
             result = asr_model.generate(input=audio_path)
