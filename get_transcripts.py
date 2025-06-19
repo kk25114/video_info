@@ -384,6 +384,52 @@ def generate_ai_summary(transcript_text):
             print(f"    -> 完整响应: {response.text}")
         return None
 
+def correct_transcript_with_deepseek(transcript_text):
+    """调用 DeepSeek API，对文稿进行错别字校正，并保持原有段落结构。"""
+    print("--> 正在使用 DeepSeek API 进行错别字校正...")
+
+    config_path = 'config.json'
+    api_key = None
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                api_key = json.load(f).get("DEEPSEEK_API_KEY")
+        except Exception:
+            pass
+
+    if not api_key:
+        print("    -> 未找到 DEEPSEEK_API_KEY，跳过校正。")
+        return transcript_text
+
+    api_url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    prompt = (
+        "你是一位专业的中文校对专家。请仔细检查并纠正下方文稿中的所有错别字、常见用词错误和明显的标点错误。"
+        "请务必保持段落和换行的原有结构，不要添加或删除内容，只做必要的文字校正。"
+        "直接返回修订后的完整文稿，不要输出任何解释说明。\n\n"
+        "--- 原文开始 ---\n"
+        f"{transcript_text}\n"
+        "--- 原文结束 ---"
+    )
+
+    data = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    try:
+        resp = requests.post(api_url, headers=headers, json=data, timeout=180)
+        resp.raise_for_status()
+        corrected = resp.json()['choices'][0]['message']['content'].strip()
+        return corrected if corrected else transcript_text
+    except Exception as e:
+        print(f"    -> 校正失败: {e}，将使用原文。")
+        return transcript_text
+
 def main(args):
     """主执行函数。"""
     check_dependencies()
@@ -479,6 +525,10 @@ def main(args):
         # 3. 如果成功获取文稿，则继续处理
         if transcript_text and transcript_text != "permanent_failure":
             
+            # 可选错别字校正
+            if args.correct:
+                transcript_text = correct_transcript_with_deepseek(transcript_text)
+
             # 5. 构建基础 Markdown 内容
             filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
             transcript_file_path = os.path.join(args.output_dir, filename)
@@ -594,6 +644,7 @@ if __name__ == '__main__':
     # 新增的参数
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
     parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成简介和话题。')
+    parser.add_argument('--correct', action='store_true', help='在生成摘要之前，对文稿进行错别字校正。')
 
     args = parser.parse_args()
     main(args)
