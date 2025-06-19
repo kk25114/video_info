@@ -53,6 +53,32 @@ def sanitize_filename(title):
     sanitized = sanitized.replace(' ', '_')
     return sanitized[:100]
 
+def get_video_metadata(video_url):
+    """使用 yt-dlp 一次性获取视频的所有元数据。"""
+    print("--> 正在获取视频元数据...")
+    try:
+        command = ['yt-dlp', '--dump-json', video_url]
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=60
+        )
+        # yt-dlp might output multiple JSON objects for playlists, we only want the first one.
+        first_line = result.stdout.strip().splitlines()[0]
+        metadata = json.loads(first_line)
+        
+        return {
+            "title": metadata.get('title'),
+            "description": metadata.get('description'),
+            "tags": metadata.get('tags', []),
+        }
+    except Exception as e:
+        print(f"--> 获取元数据时出错: {e}")
+        # 返回一个包含 None 值的字典，以避免后续代码出错
+        return {
+            "title": None,
+            "description": None,
+            "tags": [],
+        }
+
 def get_video_upload_date(video_url):
     """使用 yt-dlp 获取视频的上传日期 (格式: YYYYMMDD)。"""
     try:
@@ -64,17 +90,6 @@ def get_video_upload_date(video_url):
     except Exception as e:
         # 不打印错误，因为这可能在主流程中只是一个尝试
         return None
-
-def get_video_title(video_url):
-    """使用 YouTube oEmbed API 获取视频标题。"""
-    oembed_url = f"https://www.youtube.com/oembed?url={video_url}&format=json"
-    try:
-        response = requests.get(oembed_url)
-        if response.status_code == 200:
-            return response.json()['title']
-    except requests.exceptions.RequestException as e:
-        print(f"--> 获取标题时网络错误: {e}")
-    return None
 
 def get_video_id(url):
     """从 URL 中提取 YouTube 视频 ID。"""
@@ -105,31 +120,6 @@ def format_transcript_text(text, asr_provider='whisper'):
         return text.strip()
         
     return text
-
-def get_video_description(video_url):
-    """使用 yt-dlp 获取视频的描述。"""
-    try:
-        result = subprocess.run(
-            ['yt-dlp', '--print', '%(description)s', video_url],
-            capture_output=True, text=True, check=True, timeout=30
-        )
-        return result.stdout.strip()
-    except Exception:
-        return None
-
-def get_video_tags(video_url):
-    """使用 yt-dlp 获取视频的标签，并返回一个列表。"""
-    try:
-        result = subprocess.run(
-            ['yt-dlp', '--print', '%(tags)s', video_url],
-            capture_output=True, text=True, check=True, timeout=30
-        )
-        tags_str = result.stdout.strip()
-        if tags_str and tags_str != 'NA':
-            return [tag.strip() for tag in tags_str.split(',')]
-        return []
-    except Exception:
-        return []
 
 def summarize_with_deepseek(transcript_text):
     """使用 DeepSeek API 生成文本摘要。"""
@@ -312,6 +302,77 @@ def get_next_file_index(output_dir):
                 max_index = current_index
     return max_index + 1
 
+def generate_metadata_with_deepseek(transcript_text):
+    """使用 DeepSeek API 根据文稿内容生成标题、简介和话题。"""
+    print("--> 正在使用 DeepSeek API 生成元数据...")
+    
+    config_path = 'config.json'
+    api_key = None
+    
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            try:
+                config = json.load(f)
+                api_key = config.get("DEEPSEEK_API_KEY")
+            except json.JSONDecodeError:
+                print(f"    -> 警告: '{config_path}' 文件格式错误，不是有效的 JSON。")
+    
+    if not api_key:
+        print(f"    -> 警告: 未在 '{config_path}' 文件中找到 'DEEPSEEK_API_KEY'。已跳过元数据生成。")
+        return None
+
+    api_url = "https://api.deepseek.com/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    prompt = (
+        "你是一个专业的中文内容分析师。请根据以下视频文稿，分析其核心内容，并以严格的 JSON 格式返回一个包含以下三个键的对​​象：\n"
+        "1. `title`: 一个简洁、精炼、能准确概括全文主旨的标题 (字符串)。\n"
+        "2. `description`: 一段约100-150字的简介，清晰地介绍视频的主要内容、关键论点和结论 (字符串)。\n"
+        "3. `tags`: 一个包含5个最相关的关键词的数组 (字符串数组)。\n\n"
+        "确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\n\n"
+        "--- 文稿开始 ---\n"
+        f"{transcript_text}\n"
+        "--- 文稿结束 ---"
+    )
+
+    data = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        print("    1/2: 正在向 DeepSeek API 发送请求...")
+        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        response.raise_for_status()
+        print("    2/2: 已收到 API 响应。")
+        
+        result = response.json()
+        content_str = result['choices'][0]['message']['content']
+        metadata = json.loads(content_str) # 解析返回的 JSON 字符串
+        
+        # 验证返回的数据结构
+        if 'title' in metadata and 'description' in metadata and 'tags' in metadata:
+            return metadata
+        else:
+            print("    -> 错误: API 返回的 JSON 格式不符合预期。")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"    -> 错误: 调用 DeepSeek API 时出错: {e}")
+        if hasattr(e, 'response') and e.response:
+            print(f"    -> 响应内容: {e.response.text}")
+        return None
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        print(f"    -> 错误: 解析 API 响应失败: {e}")
+        if 'response' in locals():
+            print(f"    -> 完整响应: {response.text}")
+        return None
+
 def main(args):
     """主执行函数。"""
     check_dependencies()
@@ -377,18 +438,7 @@ def main(args):
 
         print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
 
-        video_title = get_video_title(link)
-        video_description = get_video_description(link)
-        video_tags = get_video_tags(link)
-        
-        if video_title:
-            sanitized_title = sanitize_filename(video_title)
-        else:
-            print(f"--> 警告: 无法获取视频标题。将使用视频 ID '{video_id}' 作为备用文件名。")
-            sanitized_title = video_id
-
         transcript_text = None
-        summary_text = None
         is_from_asr = False
         
         try:
@@ -400,7 +450,6 @@ def main(args):
         except Exception as e:
             print(f"无法获取官方文稿: {str(e).strip()}")
             # 官方文稿获取失败，启动 ASR 备用方案
-            # 使用一个临时的、唯一的名称来下载音频，避免冲突
             base_filename_for_audio = f"temp_audio_{video_id}"
             transcript_text = transcribe_audio_fallback(link, args.output_dir, base_filename_for_audio, args) # transcript_text can now be string, None, or "permanent_failure"
             if transcript_text and transcript_text != "permanent_failure":
@@ -409,35 +458,41 @@ def main(args):
         # 根据 transcript_text 的最终状态决定如何操作
         if transcript_text and transcript_text != "permanent_failure":
             
+            # 使用 AI 生成元数据
+            ai_metadata = None
             if args.summarize:
-                summary_text = summarize_with_deepseek(transcript_text)
+                ai_metadata = generate_metadata_with_deepseek(transcript_text)
+            
+            # 确定标题和文件名
+            if ai_metadata and ai_metadata.get("title"):
+                display_title = ai_metadata["title"]
+                sanitized_title = sanitize_filename(display_title)
+            else:
+                # 如果AI生成失败，使用原始链接的ID作为备用
+                display_title = f"视频ID: {video_id}"
+                sanitized_title = video_id
 
-            # 成功获取文稿
             filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
             transcript_file_path = os.path.join(args.output_dir, filename)
             
-            display_title = video_title if video_title else f"ID: {video_id}"
+            # 构建 Markdown 内容
             markdown_content = f"# {display_title}\n\n"
             markdown_content += f"**原始链接:** <{link}>\n\n"
             
-            has_metadata = video_description or video_tags or summary_text
-            if has_metadata:
+            # 添加 AI 生成的元数据
+            if ai_metadata:
                 markdown_content += "---\n\n"
+                
+                if ai_metadata.get("description"):
+                    markdown_content += f"## 简介\n\n{ai_metadata['description']}\n\n"
 
-            if video_description:
-                markdown_content += f"## 简介\n\n{video_description}\n\n"
-
-            if video_tags:
-                markdown_content += f"## 话题\n\n"
-                for tag in video_tags:
-                    hashtag = tag.replace(' ', '')
-                    markdown_content += f"- #{hashtag}\n"
-                markdown_content += "\n"
-            
-            if summary_text:
-                markdown_content += f"## AI 摘要\n\n{summary_text}\n\n"
-            
-            if has_metadata:
+                if ai_metadata.get("tags"):
+                    markdown_content += f"## 话题\n\n"
+                    for tag in ai_metadata['tags']:
+                        hashtag = tag.replace(' ', '')
+                        markdown_content += f"- #{hashtag}\n"
+                    markdown_content += "\n"
+                
                 markdown_content += "---\n\n"
             
             if is_from_asr:
@@ -528,7 +583,7 @@ if __name__ == '__main__':
     
     # 新增的参数
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
-    parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 生成文稿摘要 (需要 config.json 文件)。')
+    parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成标题、简介和话题。')
 
     args = parser.parse_args()
     main(args)
