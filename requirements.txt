@@ -1,5 +1,11 @@
+# 核心依赖
 requests
 youtube-transcript-api
+
+# 可选依赖
+# 如果需要使用 ASR 备用方案，请根据您的需要安装:
+# pip install opencc-python-reimplemented funasr openai-whisper
+
 torch
 torchaudio
 openai-whisper

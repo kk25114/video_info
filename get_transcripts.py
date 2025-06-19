@@ -105,6 +105,81 @@ def format_transcript_text(text, asr_provider='whisper'):
         
     return text
 
+def get_video_description(video_url):
+    """使用 yt-dlp 获取视频的描述。"""
+    try:
+        result = subprocess.run(
+            ['yt-dlp', '--print', '%(description)s', video_url],
+            capture_output=True, text=True, check=True, timeout=30
+        )
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+def get_video_tags(video_url):
+    """使用 yt-dlp 获取视频的标签，并返回一个列表。"""
+    try:
+        result = subprocess.run(
+            ['yt-dlp', '--print', '%(tags)s', video_url],
+            capture_output=True, text=True, check=True, timeout=30
+        )
+        tags_str = result.stdout.strip()
+        if tags_str and tags_str != 'NA':
+            return [tag.strip() for tag in tags_str.split(',')]
+        return []
+    except Exception:
+        return []
+
+def summarize_with_xai(transcript_text):
+    """使用 x.ai API 生成文本摘要。"""
+    print("--> 正在尝试使用 x.ai API 生成摘要...")
+    
+    api_key = "xai-6HyYIjWRueBmErSnhzuBlYBTV6Rm7u0lCkQw3IshoIDdOhTHwIZm0P9tpzhNRSat3RokzFtvlS3inCzz"
+
+    api_url = "https://api.x.ai/v1/chat/completions"
+    model_name = "@xai-6HyYIjWRueBmErSnhzuBlYBTV6Rm7u0lCkQw3IshoIDdOhTHwIZm0P9tpzhNRSat3RokzFtvlS3inCzz"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    prompt = (
+        "你是一个专业的中文内容编辑，擅长从视频文稿中提炼核心信息。\n"
+        "请根据以下视频文稿，生成一个简洁、流畅、分为三个段落的摘要。\n"
+        "摘要应准确地反映视频的主要内容、关键论点和结论，避免加入自己的观点或猜测。\n"
+        "--- 文稿开始 ---\n"
+        f"{transcript_text}\n"
+        "--- 文稿结束 ---\n"
+        "请输出三个段落的摘要："
+    )
+
+    data = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    try:
+        print(f"    1/2: 正在向 x.ai API ({model_name}) 发送请求...")
+        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        response.raise_for_status()
+        print("    2/2: 已收到 API 响应。")
+        
+        result = response.json()
+        summary = result['choices'][0]['message']['content'].strip()
+        return summary
+
+    except requests.exceptions.RequestException as e:
+        print(f"    -> 错误: 调用 x.ai API 时出错: {e}")
+        if hasattr(e, 'response') and e.response:
+            print(f"    -> 响应内容: {e.response.text}")
+        return None
+    except (KeyError, IndexError) as e:
+        print(f"    -> 错误: 解析 API 响应失败: {e}")
+        if 'response' in locals():
+            print(f"    -> 完整响应: {response.text}")
+        return None
+
 def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     """使用指定的ASR引擎从音频转录文稿作为备用方案。"""
     global asr_model
@@ -288,6 +363,8 @@ def main(args):
         print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
 
         video_title = get_video_title(link)
+        video_description = get_video_description(link)
+        video_tags = get_video_tags(link)
         
         if video_title:
             sanitized_title = sanitize_filename(video_title)
@@ -296,6 +373,7 @@ def main(args):
             sanitized_title = video_id
 
         transcript_text = None
+        summary_text = None
         is_from_asr = False
         
         try:
@@ -315,6 +393,10 @@ def main(args):
 
         # 根据 transcript_text 的最终状态决定如何操作
         if transcript_text and transcript_text != "permanent_failure":
+            
+            if args.summarize:
+                summary_text = summarize_with_xai(transcript_text)
+
             # 成功获取文稿
             filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
             transcript_file_path = os.path.join(args.output_dir, filename)
@@ -322,6 +404,26 @@ def main(args):
             display_title = video_title if video_title else f"ID: {video_id}"
             markdown_content = f"# {display_title}\n\n"
             markdown_content += f"**原始链接:** <{link}>\n\n"
+            
+            has_metadata = video_description or video_tags or summary_text
+            if has_metadata:
+                markdown_content += "---\n\n"
+
+            if video_description:
+                markdown_content += f"## 简介\n\n{video_description}\n\n"
+
+            if video_tags:
+                markdown_content += f"## 话题\n\n"
+                for tag in video_tags:
+                    hashtag = tag.replace(' ', '')
+                    markdown_content += f"- #{hashtag}\n"
+                markdown_content += "\n"
+            
+            if summary_text:
+                markdown_content += f"## AI 摘要\n\n{summary_text}\n\n"
+            
+            if has_metadata:
+                markdown_content += "---\n\n"
             
             if is_from_asr:
                 markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
@@ -411,6 +513,7 @@ if __name__ == '__main__':
     
     # 新增的参数
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
+    parser.add_argument('--summarize', action='store_true', help='使用 x.ai API 生成文稿摘要。')
 
     args = parser.parse_args()
     main(args)
