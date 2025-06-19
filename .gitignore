@@ -1,0 +1,19 @@
+# 配置文件
+config.json
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+
+# 日志和数据目录
+*.log
+2.sunrich/
+transcripts/ 

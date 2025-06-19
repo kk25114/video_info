@@ -1,6 +1,7 @@
 import os
 import argparse
 import re
+import json
 import requests
 import subprocess
 import shutil
@@ -130,15 +131,29 @@ def get_video_tags(video_url):
     except Exception:
         return []
 
-def summarize_with_xai(transcript_text):
-    """使用 x.ai API 生成文本摘要。"""
-    print("--> 正在尝试使用 x.ai API 生成摘要...")
+def summarize_with_deepseek(transcript_text):
+    """使用 DeepSeek API 生成文本摘要。"""
+    print("--> 正在尝试使用 DeepSeek API 生成摘要...")
     
-    api_key = "xai-6HyYIjWRueBmErSnhzuBlYBTV6Rm7u0lCkQw3IshoIDdOhTHwIZm0P9tpzhNRSat3RokzFtvlS3inCzz"
+    config_path = 'config.json'
+    api_key = None
+    
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            try:
+                config = json.load(f)
+                api_key = config.get("DEEPSEEK_API_KEY")
+            except json.JSONDecodeError:
+                print(f"    -> 警告: '{config_path}' 文件格式错误，不是有效的 JSON。")
+    
+    if not api_key:
+        print(f"    -> 警告: 未在 '{config_path}' 文件中找到 'DEEPSEEK_API_KEY'。已跳过摘要生成。")
+        print(f"    -> 请确保 '{config_path}' 文件存在且包含您的密钥，格式如下:")
+        print('    -> {"DEEPSEEK_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxx"}')
+        return None
 
-    api_url = "https://api.x.ai/v1/chat/completions"
-    model_name = "@xai-6HyYIjWRueBmErSnhzuBlYBTV6Rm7u0lCkQw3IshoIDdOhTHwIZm0P9tpzhNRSat3RokzFtvlS3inCzz"
-
+    api_url = "https://api.deepseek.com/chat/completions"
+    
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -155,12 +170,12 @@ def summarize_with_xai(transcript_text):
     )
 
     data = {
-        "model": model_name,
+        "model": "deepseek-chat",
         "messages": [{"role": "user", "content": prompt}],
     }
 
     try:
-        print(f"    1/2: 正在向 x.ai API ({model_name}) 发送请求...")
+        print(f"    1/2: 正在向 DeepSeek API (deepseek-chat) 发送请求...")
         response = requests.post(api_url, headers=headers, json=data, timeout=180)
         response.raise_for_status()
         print("    2/2: 已收到 API 响应。")
@@ -170,7 +185,7 @@ def summarize_with_xai(transcript_text):
         return summary
 
     except requests.exceptions.RequestException as e:
-        print(f"    -> 错误: 调用 x.ai API 时出错: {e}")
+        print(f"    -> 错误: 调用 DeepSeek API 时出错: {e}")
         if hasattr(e, 'response') and e.response:
             print(f"    -> 响应内容: {e.response.text}")
         return None
@@ -395,7 +410,7 @@ def main(args):
         if transcript_text and transcript_text != "permanent_failure":
             
             if args.summarize:
-                summary_text = summarize_with_xai(transcript_text)
+                summary_text = summarize_with_deepseek(transcript_text)
 
             # 成功获取文稿
             filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
@@ -513,7 +528,7 @@ if __name__ == '__main__':
     
     # 新增的参数
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
-    parser.add_argument('--summarize', action='store_true', help='使用 x.ai API 生成文稿摘要。')
+    parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 生成文稿摘要 (需要 config.json 文件)。')
 
     args = parser.parse_args()
     main(args)
