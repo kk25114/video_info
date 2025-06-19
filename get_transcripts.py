@@ -302,9 +302,22 @@ def get_next_file_index(output_dir):
                 max_index = current_index
     return max_index + 1
 
-def generate_metadata_with_deepseek(transcript_text):
-    """使用 DeepSeek API 根据文稿内容生成标题、简介和话题。"""
-    print("--> 正在使用 DeepSeek API 生成元数据...")
+def get_video_title(video_url):
+    """使用 yt-dlp 获取视频的原始标题。"""
+    print("--> 正在获取视频原始标题...")
+    try:
+        command = ['yt-dlp', '--print', 'title', '--no-playlist', video_url]
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=30
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"--> 获取原始标题时出错: {e}")
+        return None
+
+def generate_ai_summary(transcript_text):
+    """使用 DeepSeek API 根据文稿生成简介和话题。"""
+    print("--> 正在使用 DeepSeek API 生成简介和话题...")
     
     config_path = 'config.json'
     api_key = None
@@ -318,7 +331,7 @@ def generate_metadata_with_deepseek(transcript_text):
                 print(f"    -> 警告: '{config_path}' 文件格式错误，不是有效的 JSON。")
     
     if not api_key:
-        print(f"    -> 警告: 未在 '{config_path}' 文件中找到 'DEEPSEEK_API_KEY'。已跳过元数据生成。")
+        print(f"    -> 警告: 未在 '{config_path}' 文件中找到 'DEEPSEEK_API_KEY'。已跳过此步骤。")
         return None
 
     api_url = "https://api.deepseek.com/chat/completions"
@@ -329,10 +342,9 @@ def generate_metadata_with_deepseek(transcript_text):
     }
     
     prompt = (
-        "你是一个专业的中文内容分析师。请根据以下视频文稿，分析其核心内容，并以严格的 JSON 格式返回一个包含以下三个键的对​​象：\n"
-        "1. `title`: 一个简洁、精炼、能准确概括全文主旨的标题 (字符串)。\n"
-        "2. `description`: 一段约100-150字的简介，清晰地介绍视频的主要内容、关键论点和结论 (字符串)。\n"
-        "3. `tags`: 一个包含5个最相关的关键词的数组 (字符串数组)。\n\n"
+        "你是一个专业的中文内容分析师。请根据以下视频文稿，分析其核心内容，并以严格的 JSON 格式返回一个包含以下两个键的对​​象：\n"
+        "1. `description`: 一段约100-150字的简介，清晰地介绍视频的主要内容、关键论点和结论 (字符串)。\n"
+        "2. `tags`: 一个包含5个最相关的关键词的数组 (字符串数组)。\n\n"
         "确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\n\n"
         "--- 文稿开始 ---\n"
         f"{transcript_text}\n"
@@ -353,11 +365,10 @@ def generate_metadata_with_deepseek(transcript_text):
         
         result = response.json()
         content_str = result['choices'][0]['message']['content']
-        metadata = json.loads(content_str) # 解析返回的 JSON 字符串
+        summary_data = json.loads(content_str)
         
-        # 验证返回的数据结构
-        if 'title' in metadata and 'description' in metadata and 'tags' in metadata:
-            return metadata
+        if 'description' in summary_data and 'tags' in summary_data:
+            return summary_data
         else:
             print("    -> 错误: API 返回的 JSON 格式不符合预期。")
             return None
@@ -437,7 +448,17 @@ def main(args):
         # 视频ID在此处一定存在且是新的，因为前面已经筛选过
 
         print(f"\n正在处理第 {current_progress + 1}/{total_new_videos} 个新视频: {link}")
+        
+        # 1. 使用 yt-dlp 获取原始标题
+        display_title = get_video_title(link)
+        if display_title:
+            sanitized_title = sanitize_filename(display_title)
+        else:
+            print(f"--> 警告: 无法获取视频原始标题。将使用视频 ID '{video_id}' 作为备用。")
+            display_title = f"视频ID: {video_id}"
+            sanitized_title = video_id
 
+        # 2. 获取文稿
         transcript_text = None
         is_from_asr = False
         
@@ -455,46 +476,35 @@ def main(args):
             if transcript_text and transcript_text != "permanent_failure":
                 is_from_asr = True
 
-        # 根据 transcript_text 的最终状态决定如何操作
+        # 3. 如果成功获取文稿，则继续处理
         if transcript_text and transcript_text != "permanent_failure":
             
-            # 使用 AI 生成元数据
-            ai_metadata = None
-            if args.summarize:
-                ai_metadata = generate_metadata_with_deepseek(transcript_text)
-            
-            # 确定标题和文件名
-            if ai_metadata and ai_metadata.get("title"):
-                display_title = ai_metadata["title"]
-                sanitized_title = sanitize_filename(display_title)
-            else:
-                # 如果AI生成失败，使用原始链接的ID作为备用
-                display_title = f"视频ID: {video_id}"
-                sanitized_title = video_id
-
+            # 5. 构建基础 Markdown 内容
             filename = f"{str(next_file_index).zfill(4)}_{sanitized_title}.md"
             transcript_file_path = os.path.join(args.output_dir, filename)
             
-            # 构建 Markdown 内容
             markdown_content = f"# {display_title}\n\n"
             markdown_content += f"**原始链接:** <{link}>\n\n"
-            
-            # 添加 AI 生成的元数据
-            if ai_metadata:
-                markdown_content += "---\n\n"
-                
-                if ai_metadata.get("description"):
-                    markdown_content += f"## 简介\n\n{ai_metadata['description']}\n\n"
 
-                if ai_metadata.get("tags"):
-                    markdown_content += f"## 话题\n\n"
-                    for tag in ai_metadata['tags']:
-                        hashtag = tag.replace(' ', '')
-                        markdown_content += f"- #{hashtag}\n"
-                    markdown_content += "\n"
-                
-                markdown_content += "---\n\n"
-            
+            # 6. 如果需要，使用 AI 生成简介和话题，并插入
+            if args.summarize:
+                ai_summary = generate_ai_summary(transcript_text)
+                if ai_summary:
+                    summary_section = "---\n\n"
+                    if ai_summary.get("description"):
+                        summary_section += f"## 简介\n\n{ai_summary['description']}\n\n"
+                    if ai_summary.get("tags"):
+                        summary_section += f"## 话题\n\n"
+                        for tag in ai_summary['tags']:
+                            hashtag = tag.replace(' ', '')
+                            summary_section += f"- #{hashtag}\n"
+                        summary_section += "\n"
+                    summary_section += "---\n\n"
+                    
+                    # 将AI生成的部分插入到链接和文稿之间
+                    markdown_content += summary_section
+
+            # 7. 添加 ASR 注意事项和文稿正文
             if is_from_asr:
                 markdown_content += f"> **注意**: 本文稿由 `{args.asr}` 语音识别生成，可能存在错误。\n\n"
 
@@ -583,7 +593,7 @@ if __name__ == '__main__':
     
     # 新增的参数
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
-    parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成标题、简介和话题。')
+    parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成简介和话题。')
 
     args = parser.parse_args()
     main(args)
