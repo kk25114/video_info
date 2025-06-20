@@ -6,6 +6,7 @@ import requests
 import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
+from datetime import datetime
 
 # 全局变量，用于懒加载 ASR 模型
 asr_model = None
@@ -343,7 +344,7 @@ def generate_ai_summary(transcript_text):
     
     prompt = (
         "你是一个专业的中文内容分析师。请根据以下视频文稿，分析其核心内容，并以严格的 JSON 格式返回一个包含以下两个键的对​​象：\n"
-        "1. `description`: 一段约100-150字的简介，清晰地介绍视频的主要内容、关键论点和结论 (字符串)。\n"
+        "1. `description`: 一段约100-150字的简介，对读者清晰地介绍视频的主要内容、关键论点和结论 (字符串)。\n"
         "2. `tags`: 一个包含5个最相关的关键词的数组 (字符串数组)。\n\n"
         "确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\n\n"
         "--- 文稿开始 ---\n"
@@ -579,17 +580,12 @@ def main(args):
             else: # transcript_text is None
                 print(f"处理失败，检测到临时性错误，将可重试: {link}")
 
-    # 在所有视频处理完毕后，更新该频道的最后处理日期
-    # new_video_links is guaranteed to exist because of the early return above
-    newest_video_link = new_video_links[-1]
-    print(f"\n正在为最新处理的视频获取上传日期: {newest_video_link}")
-    upload_date = get_video_upload_date(newest_video_link)
-    
-    if upload_date:
-        date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
-        with open(date_log_path, 'w', encoding='utf-8') as f:
-            f.write(upload_date)
-        print(f"--> 已更新本频道的最后处理日期为: {upload_date}")
+    # 在所有视频处理完毕后，使用当前系统日期时间写入 last_processed_date.log
+    now_str = datetime.now().strftime('%Y%m%d%H%M%S')
+    date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
+    with open(date_log_path, 'w', encoding='utf-8') as f:
+        f.write(now_str)
+    print(f"--> 已记录本次处理日期时间: {now_str}")
 
     # 如果指定了 --auto-commit，则在最后调用外部脚本执行 Git 操作
     if args.auto_commit:
