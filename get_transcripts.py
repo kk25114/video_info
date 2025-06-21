@@ -55,32 +55,6 @@ def sanitize_filename(title):
     sanitized = sanitized.replace(' ', '_')
     return sanitized[:100]
 
-def get_video_metadata(video_url):
-    """使用 yt-dlp 一次性获取视频的所有元数据。"""
-    print("--> 正在获取视频元数据...")
-    try:
-        command = ['yt-dlp', '--dump-json', video_url]
-        result = subprocess.run(
-            command, capture_output=True, text=True, check=True, timeout=60
-        )
-        # yt-dlp might output multiple JSON objects for playlists, we only want the first one.
-        first_line = result.stdout.strip().splitlines()[0]
-        metadata = json.loads(first_line)
-        
-        return {
-            "title": metadata.get('title'),
-            "description": metadata.get('description'),
-            "tags": metadata.get('tags', []),
-        }
-    except Exception as e:
-        print(f"--> 获取元数据时出错: {e}")
-        # 返回一个包含 None 值的字典，以避免后续代码出错
-        return {
-            "title": None,
-            "description": None,
-            "tags": [],
-        }
-
 def get_video_upload_date(video_url):
     """使用 yt-dlp 获取视频的上传日期 (格式: YYYYMMDD)。"""
     try:
@@ -449,13 +423,13 @@ def main(args):
     processed_ids = set()
     if os.path.exists(processed_log_path):
         with open(processed_log_path, 'r', encoding='utf-8') as f:
-            processed_ids = set(line.strip() for line in f)
-    
+            processed_ids = set(line.strip() for line in f if line.strip())
+
     failed_log_path = os.path.join(args.output_dir, 'failed_videos.log')
     failed_ids = set()
     if os.path.exists(failed_log_path):
         with open(failed_log_path, 'r', encoding='utf-8') as f:
-            failed_ids = set(line.strip() for line in f)
+            failed_ids = set(line.strip() for line in f if line.strip())
 
     # 合并成一个总的跳过列表
     skip_ids = processed_ids.union(failed_ids)
