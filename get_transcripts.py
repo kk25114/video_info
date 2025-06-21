@@ -24,16 +24,12 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
-def get_video_links_from_url(youtube_url, archive_path=None):
+def get_video_links_from_url(youtube_url):
     """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。"""
     print(f"正在从目标链接获取所有视频 URL: {youtube_url}")
     try:
         # 构造 yt-dlp 命令
-        command = ['yt-dlp', '--flat-playlist']
-        if archive_path and os.path.exists(archive_path):
-            command.extend(['--download-archive', archive_path, '--break-on-existing'])
-            print(f"已启用 download-archive 过滤: {archive_path}")
-        command.extend(['--get-url', youtube_url])
+        command = ['yt-dlp', '--flat-playlist', '--get-url', youtube_url]
         result = subprocess.run(
             command, capture_output=True, text=True, check=True, timeout=180
         )
@@ -440,10 +436,7 @@ def main(args):
     """主执行函数。"""
     check_dependencies()
     
-    # 如果用户未指定 --download-archive，则自动使用 processed_videos.log 作为归档文件
-    archive_path = args.download_archive if args.download_archive else os.path.join(args.output_dir, 'processed_videos.log')
-
-    video_links = get_video_links_from_url(args.youtube_url, archive_path)
+    video_links = get_video_links_from_url(args.youtube_url)
     if not video_links:
         print("未获取到任何视频链接，程序退出。")
         return
@@ -649,11 +642,6 @@ if __name__ == '__main__':
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
     parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成简介和话题。')
     parser.add_argument('--correct', action='store_true', help='在生成摘要之前，对文稿进行错别字校正。')
-    parser.add_argument(
-        '--download-archive',
-        type=str,
-        help='使用 yt-dlp 的 --download-archive 选项，以避免重复下载已下载的视频。'
-    )
 
     args = parser.parse_args()
     main(args)
