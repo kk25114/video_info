@@ -12,3 +12,5 @@ python3 get_transcripts.py "https://www.youtube.com/@freeharbor2022/videos" --ou
 
 
 
+
+
