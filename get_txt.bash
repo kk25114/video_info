@@ -9,8 +9,7 @@ python3 get_transcripts.py "https://www.youtube.com/@%E7%9F%A5%E8%AF%86%E6%9E%A2
 python3 get_transcripts.py "https://www.youtube.com/@xiaoboreading/videos" --output_dir "9.小播讲哲学" --auto-commit --summarize --correct
 python3 get_transcripts.py "https://www.youtube.com/@dailyreading/videos" --output_dir "10.天天读书" --auto-commit --summarize --correct
 python3 get_transcripts.py "https://www.youtube.com/@freeharbor2022/videos" --output_dir "11.Anthony看世界" --auto-commit --summarize --correct
-
-
+python3 get_transcripts.py "https://www.youtube.com/@xiao_lin_shuo/videos" --output_dir "12.小林说" --auto-commit --summarize --correct
 
 
 
