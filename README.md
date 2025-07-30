@@ -23,12 +23,21 @@ video_info/
 ```
 
 ---
-## 核心组件
-| 组件 | 功能 |
-|------|------|
-| `get_transcripts.py` | 抓取视频 → 官方字幕 / Whisper / FunASR → Markdown |
-| `tts_cli/long_tts.py` | 将超长 Markdown 正文分段调用 Azure Speech → WAV |
-| `wrap_sunrich.sh` | 将两者串联：<br>① 记录旧 md → ② 抓取 → ③ 找新增 md → ④ 同名 WAV |
+## 核心组件与使用示例
+
+| 组件 | 功能 | 主要参数 | 最小示例 |
+|------|------|----------|----------|
+| `get_transcripts.py` | 抓取视频 → 官方字幕 / Whisper / FunASR → Markdown | `url`(必填) 频道/播放列表；`--output_dir` 保存目录；`--asr funasr|whisper` 备用识别；`--auto-commit` 抓取完自动 git push；`--summarize/--correct` 调用 DeepSeek 摘要&校正 | ```
+python3 get_transcripts.py "https://url" --output_dir "2.sunrich" --asr funasr --summarize --correct
+``` |
+| `tts_cli/long_tts.py` | 将超长 Markdown 正文分段调用 Azure Speech → WAV | `input_file`(必填) Markdown/纯文本；`output_wav`(可选) 若省略落到 `saveDir`；参数均由 `config.json` 控制，如 `voiceName/speed` 等 | ```
+python3 tts_cli/long_tts.py 2.sunrich/0077.md \
+                       "/mnt/d/Program Files/下载/0077.wav"
+``` |
+| `wrap_sunrich.sh` | Sunrich 专用流水线：① 记录旧 md ② 抓取 ③ 差集 ④ 每篇朗读 | 变量：`CHANNEL_URL` `OUTPUT_DIR` `SAVE_DIR`；内部调用前两脚本 | ```
+./wrap_sunrich.sh   # 一键完成抓取+朗读
+``` |
+
 
 ---
 ## 安装依赖
