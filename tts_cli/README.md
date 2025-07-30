@@ -1,60 +1,45 @@
-# long_tts  —  Azure 长文本语音合成脚本
+# tts_cli 使用说明
 
-一个 **单文件命令行** 工具，依赖 Azure Speech SDK，可将超长 UTF-8 文本合成为 WAV 音频。
+该目录包含长文本语音合成脚本 `long_tts.py` 及配置文件 `config.json`。
 
----
-## 1. 安装依赖
+## 1. 快速开始
 ```bash
-pip install azure-cognitiveservices-speech
-sudo apt install -y ffmpeg   # 用于拼接分段音频
+cd tts_cli
+# 第一次运行会生成 config.json 并提示填写 speechKey
+python3 long_tts.py dummy.txt
+# 编辑 config.json 填写 Azure KEY 后即可使用
 ```
 
----
-## 2. 配置（config.json）
-首次运行脚本会在当前目录自动创建 `config.json` 并退出：
-```bash
-python3 long_tts.py dummy.txt  # 生成配置模板
-```
-打开文件填写或修改即可：
-```json
-{
-  "speechKey": "<YOUR_AZURE_KEY>",
-  "serviceRegion": "westus",
-  "voiceName": "zh-CN-YunyangNeural",
-  "voiceStyle": "customerservice",
-  "role": "",
-  "speed": 1.16,
-  "pitch": "0%",
-  "saveDir": "./tts_output",
-  "retryCount": 0,
-  "retryInterval": 5,
-  "chunkLimit": 4500
-}
-```
-常用字段说明：
-| 字段 | 作用 | 示例 |
-|------|------|------|
-| speechKey | **必填**，Azure 语音服务密钥 | `52J6...` |
-| serviceRegion | 区域 | `westus` |
-| voiceName | 音色 | `zh-CN-XiaoxiaoNeural` |
-| voiceStyle | 说话风格（部分音色支持） | `customerservice` |
-| role | 角色（部分音色支持） | `Boy` |
-| speed | 语速 (1.0 = 原速) | `0.9` |
-| pitch | 音高 | `"+5%"` |
-| saveDir | 输出目录 | `./tts_output` |
-| retryCount / retryInterval | 失败重试 | `3 / 5` |
-| chunkLimit | 单段最大字符数 | `4500` |
+## 2. 手动转换任意 Markdown
+示例：将 `../2.sunrich/0075_释永信的问题，没那么简单.md` 朗读为同名 wav。
 
----
-## 3. 使用
 ```bash
+# 进入 tts_cli 目录
 cd /home/github/video_info/tts_cli
-python3 long_tts.py article.txt
-```
-完成后将在 `saveDir` 中生成 `YYYYMMDD_HHMMSS.wav`。
 
----
-## 4. 主要特性
-* 自动分段（默认每段 ≤ 4500 字符），超长文本一键合成。
-* 支持失败自动重试、临时分段自动清理。
-* 所有逻辑纯 Python，易于集成到定时任务、CI、后台服务。
+MD="../2.sunrich/0075_释永信的问题，没那么简单.md"
+BASENAME=$(basename "$MD" .md)
+OUT="/mnt/d/Program Files/下载/${BASENAME}.wav"
+
+python3 long_tts.py "$MD" "$OUT"
+```
+
+脚本会：
+1. 自动裁剪正文（跳过标题/注意提示）。
+2. 按中文标点分段调用 Azure TTS。
+3. 拼接生成与 Markdown 同名的 wav 到 `saveDir`（或你指定的 OUT 路径）。
+
+## 3. 仅指定输入，不给输出
+如果第二个参数省略，脚本会把音频保存到 `config.json` 的 `saveDir`，文件名为时间戳：
+```bash
+python3 long_tts.py ../2.sunrich/0075_释永信的问题，没那么简单.md
+# => /mnt/d/Program Files/下载/20250730_203015.wav
+```
+
+## 4. 调整参数
+修改 `config.json` 中：
+* `voiceName` / `voiceStyle` / `speed` / `pitch`
+* `saveDir` 输出目录
+* `retryCount` / `retryInterval` 网络不稳时可增加重试
+
+配置修改后立即生效，无需重启任何服务。

@@ -95,10 +95,3 @@ HTTPS_PROXY=…
 3. 剩余文字按中文标点自动分段后送 Azure TTS。
 
 ---
-## 常见问题
-* **WAV 与 Markdown 同名吗？** 是。`wrap_sunrich.sh` 取 `basename .md` 拼成 `basename.wav`。
-* **其它频道想复用？** 复制 `wrap_sunrich.sh`，改 `CHANNEL_URL / OUTPUT_DIR` 即可。
-* **想生成 MP3？** 在 `long_tts.py` 把 `SpeechSynthesisOutputFormat` 改成 MP3，并调整 `ffmpeg` 输出格式。
-
----
-Enjoy the automated pipeline! 🎉
