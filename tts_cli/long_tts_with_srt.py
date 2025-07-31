@@ -382,13 +382,17 @@ def main():
 
     # 确定输出文件名和路径
     if custom_output:
-        final_file = custom_output if os.path.isabs(custom_output) else os.path.join(SAVE_DIR, custom_output)
+        if os.path.isabs(custom_output):
+            final_file = custom_output
+        else:
+            # 如果是相对路径，直接使用（因为 wrap_sunrich.sh 已经包含了完整路径）
+            final_file = custom_output
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(final_file), exist_ok=True)
     else:
         # 使用与输入md文件同名的文件名
         base_name = os.path.splitext(os.path.basename(txt_path))[0]
-        output_dir = "/home/github/video_info/mk_video"
-        os.makedirs(output_dir, exist_ok=True)
-        final_file = os.path.join(output_dir, f"{base_name}.wav")
+        final_file = os.path.join(SAVE_DIR, f"{base_name}.wav")
     
     concat_wav(chunk_files, final_file)
 
