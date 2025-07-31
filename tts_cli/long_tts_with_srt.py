@@ -89,7 +89,7 @@ def generate_srt(word_boundaries: List[tuple], srt_path: str):
     if not word_boundaries:
         return
     
-    SUB_LINE_MAX_LEN = 30  # 每行字幕最大长度（中文字符）
+    SUB_LINE_MAX_LEN = 25  # 每行字幕最大长度（中文字符）
     PUNCTUATION = '。？！；…、，'  # 标点符号
     SENTENCE_END = '。？！'  # 句子结束标点符号（优先断行）
 
