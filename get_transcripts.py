@@ -8,6 +8,12 @@ import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
 from datetime import datetime
 
+# ---- 代理兜底设置 ----
+PROXY = "http://172.23.240.1:10806"
+for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+    os.environ.setdefault(key, PROXY)
+os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+
 # 全局变量，用于懒加载 ASR 模型
 asr_model = None
 

@@ -4,6 +4,12 @@
 #
 
 set -e
+
+# ---- 代理配置 ----
+export HTTP_PROXY="http://172.23.240.1:10806"
+export HTTPS_PROXY="http://172.23.240.1:10806"
+export NO_PROXY="localhost,127.0.0.1,::1"
+
 cd /home/github/video_info
 
 CHANNEL_URL="https://www.youtube.com/@sunriches/videos"
