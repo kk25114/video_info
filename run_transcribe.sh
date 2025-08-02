@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_transcribe.sh: 统一封装视频转录脚本
+# run_transcribe.sh: 定时任务-转换脚本使用 统一封装视频转录脚本
 # 用法: run_transcribe.sh CHANNEL_URL OUTPUT_DIR
 # 依赖: get_transcripts.py 位于同目录
 
