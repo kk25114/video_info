@@ -1,3 +1,35 @@
+#!/usr/bin/env python3
+"""
+视频文稿获取脚本 - 完整解决方案
+
+功能：
+- 从频道、播放列表或单个视频获取文稿
+- 支持官方字幕和AI语音识别双重方案
+- 智能错误处理和重试机制
+- 自动摘要生成和错别字校正
+- Git自动提交集成
+
+使用方法：
+    # 基本使用 - 获取频道所有新视频
+    python3 get_transcripts.py "https://www.youtube.com/@question-dialectic/videos" --output_dir "1.大问题"
+    
+    # 完整功能 - 包含摘要和校正
+    python3 get_transcripts.py "https://www.youtube.com/@sunriches/videos" \
+        --output_dir "2.sunrich" --auto-commit --summarize --correct
+    
+    # 使用Whisper模型
+    python3 get_transcripts.py "https://www.youtube.com/@yuegemovie" \
+        --output_dir "3.越哥说电影" --asr whisper --whisper_model medium
+
+依赖环境：
+    pip install youtube-transcript-api yt-dlp requests opencc funasr whisper
+    apt install ffmpeg  # Ubuntu/Debian
+
+配置文件：
+    创建config.json文件，添加DeepSeek API密钥：
+    {"DEEPSEEK_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxx"}
+"""
+
 import os
 import argparse
 import re
@@ -9,12 +41,13 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from datetime import datetime
 
 # ---- 代理兜底设置 ----
+# 支持网络代理配置，确保在中国大陆环境也能正常访问YouTube
 PROXY = "http://172.23.240.1:10806"
 for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
     os.environ.setdefault(key, PROXY)
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 
-# 全局变量，用于懒加载 ASR 模型
+# 全局变量，用于懒加载 ASR 模型，避免重复加载
 asr_model = None
 
 def check_dependencies():
@@ -69,7 +102,7 @@ def get_video_upload_date(video_url):
             capture_output=True, text=True, check=True
         )
         return result.stdout.strip()
-    except Exception as e:
+    except Exception:
         # 不打印错误，因为这可能在主流程中只是一个尝试
         return None
 

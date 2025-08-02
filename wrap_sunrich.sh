@@ -1,7 +1,30 @@
 #!/usr/bin/env bash
-# 定时任务包装脚本：抓取 Sunrich 新视频文稿，并把新增 .md 转成同名 WAV
-# Author: ChatGPT 自动生成
+# wrap_sunrich.sh: Sunrich频道专用定时任务包装脚本
 #
+# 功能：自动处理Sunrich频道新视频，包含文稿生成+语音合成
+# 特点：智能检测新增文件、自动清理、批量语音合成
+#
+# 使用方法：
+#   ./wrap_sunrich.sh
+#
+# 处理流程：
+#   1. 记录现有markdown文件
+#   2. 抓取最新视频并生成文稿
+#   3. 检测新增文件
+#   4. 清理旧音频文件
+#   5. 批量合成语音
+#
+# 输出目录：
+#   文稿：2.sunrich/
+#   音频：mk_video/
+#
+# 使用示例：
+#   # 添加到crontab，每小时检查一次
+#   0 * * * * /home/github/video_info/wrap_sunrich.sh
+#
+#   # 手动执行
+#   ./wrap_sunrich.sh
+
 
 set -e
 
