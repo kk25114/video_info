@@ -25,6 +25,7 @@
 #   # 手动执行
 #   ./wrap_sunrich.sh
 
+> /home/github/video_info/cron_get_transcripts.log
 
 set -e
 
@@ -54,6 +55,7 @@ NEW_MD=$(comm -13 /tmp/md_before.txt /tmp/md_after.txt)
 echo "🧹 清理 $SAVE_DIR 目录中的旧音频和字幕文件..."
 rm -f "$SAVE_DIR"/*.wav "$SAVE_DIR"/*.srt
 echo "   清理完成"
+echo "🧹 旧音频和字幕文件清理完成" >> /home/github/video_info/cron_get_transcripts.log
 
 # ---------- 4. 对新增文稿逐个合成语音 ----------
 for md in $NEW_MD; do
@@ -61,8 +63,11 @@ for md in $NEW_MD; do
   base=$(basename "$md" .md)
   wav="$SAVE_DIR/${base}.wav"
   echo "⚙️  合成 $md -> $wav"
-  /usr/bin/python3 tts_cli/long_tts_with_srt.py "$md" "$wav"
+  /usr/bin/python3 tts_cli/long_tts_with_srt.py "$md" "$wav" >> /home/github/video_info/cron_get_transcripts.log 2>&1
   echo "   完成 $wav"
+  echo "✅ 语音合成完成: $wav" >> /home/github/video_info/cron_get_transcripts.log
 done
 
 echo "✅ wrap_sunrich.sh 完成，本次新增 $(echo "$NEW_MD" | wc -w) 篇"
+echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ===" >> /home/github/video_info/cron_get_transcripts.log
+echo "📈 本次执行总结: 新增 $(echo "$NEW_MD" | wc -w) 篇文稿" >> /home/github/video_info/cron_get_transcripts.log
