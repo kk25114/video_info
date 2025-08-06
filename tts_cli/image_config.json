@@ -1,0 +1,10 @@
+{
+  "deepseekApiKey": "sk-74a78d49647b4b0eaa03b4723364697d",
+  "model": "deepseek-chat",
+  "imageSize": "1024x1024",
+  "imageCount": 1,
+  "quality": "standard",
+  "retryCount": 3,
+  "retryInterval": 5,
+  "saveDir": "./news_images"
+}
