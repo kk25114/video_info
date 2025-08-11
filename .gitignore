@@ -13,7 +13,6 @@ __pycache__/
 .venv
 env/
 venv/
-*.mp4
 
 # 日志和数据目录
 *.log
@@ -21,3 +20,37 @@ venv/
 # 忽略目录
 .claue/
 .gitinroe
+ 
+# 忽略 video/ 目录及其子目录中的视频与音频文件（匹配任意层级的 video 目录）
+# 视频
+video/**/*.mp4
+video/**/*.mkv
+video/**/*.avi
+video/**/*.mov
+video/**/*.wmv
+video/**/*.flv
+video/**/*.webm
+video/**/*.m4v
+video/**/*.ts
+video/**/*.mts
+video/**/*.vob
+video/**/*.3gp
+video/**/*.3g2
+
+# 音频
+video/**/*.mp3
+video/**/*.wav
+video/**/*.aac
+video/**/*.flac
+video/**/*.ogg
+video/**/*.m4a
+video/**/*.wma
+video/**/*.aiff
+video/**/*.aif
+video/**/*.aifc
+video/**/*.opus
+video/**/*.amr
+video/**/*.mid
+video/**/*.midi
+video/**/*.caf
+video/**/*.ape
