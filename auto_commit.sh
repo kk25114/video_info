@@ -32,7 +32,7 @@ echo "-----------------------------------------"
 
 # 进入脚本所在的目录，以确保 git 命令在正确的仓库中执行
 cd "$(dirname "$0")"
-git add .gitignore
+
 # 1. 检查是否有文件需要提交
 if [[ -z $(git status -s) ]]; then
     echo "✅ 工作区是干净的，没有需要提交的更改。"
@@ -40,7 +40,7 @@ if [[ -z $(git status -s) ]]; then
 fi
 
 # 2. 添加所有更改到暂存区
-git add .
+git add -A
 echo "Git: 已暂存所有更改。"
 
 # 3. 创建一个提交
