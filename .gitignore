@@ -28,29 +28,8 @@ video/**/*.mkv
 video/**/*.avi
 video/**/*.mov
 video/**/*.wmv
-video/**/*.flv
-video/**/*.webm
-video/**/*.m4v
-video/**/*.ts
-video/**/*.mts
-video/**/*.vob
-video/**/*.3gp
-video/**/*.3g2
+
 
 # 音频
 video/**/*.mp3
 video/**/*.wav
-video/**/*.aac
-video/**/*.flac
-video/**/*.ogg
-video/**/*.m4a
-video/**/*.wma
-video/**/*.aiff
-video/**/*.aif
-video/**/*.aifc
-video/**/*.opus
-video/**/*.amr
-video/**/*.mid
-video/**/*.midi
-video/**/*.caf
-video/**/*.ape
