@@ -33,3 +33,39 @@ video/**/*.wmv
 # 音频
 video/**/*.mp3
 video/**/*.wav
+
+# 忽略所有音视频（仅本地保留，不上传）
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+*.ts
+*.mts
+*.vob
+*.3gp
+*.3g2
+*.mp3
+*.wav
+*.aac
+*.flac
+*.ogg
+*.m4a
+*.wma
+*.aiff
+*.aif
+*.aifc
+*.opus
+*.amr
+*.mid
+*.midi
+*.caf
+*.ape
+# 忽略临时音频及制作目录
+*temp_audio_*
+*/temp_audio_*
+mk_video/**
+*.part
