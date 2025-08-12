@@ -3,7 +3,7 @@ config.json
 .gitinroe
 
 # Python 缓存
-__pycache__/
+__pycache__
 *.pyc
 *.pyo
 *.pyd
@@ -23,49 +23,21 @@ venv/
  
 # 忽略 video/ 目录及其子目录中的视频与音频文件（匹配任意层级的 video 目录）
 # 视频
-video/**/*.mp4
-video/**/*.mkv
-video/**/*.avi
-video/**/*.mov
-video/**/*.wmv
+video_info/**/*.mp4
+video_info/**/*.mkv
+video_info/**/*.avi
+video_info/**/*.mov
+video_info/**/*.wmv
 
 
 # 音频
-video/**/*.mp3
-video/**/*.wav
+mk_video/**/*.mp3
+mk_video/**/*.srt
+mk_video/**/*.wav
+mk_video/images/*
+mk_video/videos/*
 
 # 忽略所有音视频（仅本地保留，不上传）
 *.mp4
-*.mkv
-*.avi
-*.mov
-*.wmv
-*.flv
-*.webm
-*.m4v
-*.ts
-*.mts
-*.vob
-*.3gp
-*.3g2
-*.mp3
-*.wav
-*.aac
-*.flac
-*.ogg
-*.m4a
-*.wma
-*.aiff
-*.aif
-*.aifc
-*.opus
-*.amr
-*.mid
-*.midi
-*.caf
-*.ape
-# 忽略临时音频及制作目录
-*temp_audio_*
-*/temp_audio_*
-mk_video/**
-*.part
+
+
