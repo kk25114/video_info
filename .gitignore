@@ -33,6 +33,7 @@ dist/
 build/
 tts_cli/output/
 mk_video/output/
+mk_video/build.py
 
 # 忽略 video/ 目录及其子目录中的视频与音频文件（匹配任意层级的 video 目录）
 # 视频
