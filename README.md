@@ -18,7 +18,7 @@
 - ✅ 智能分段优化
 
 ### 3. 语音合成
-- ✅ Azure TTS高质量语音合成
+- ✅ TTS高质量语音合成
 - ✅ 支持超长文本分段处理
 - ✅ 多种中文语音可选
 - ✅ 自动语速语调调节
@@ -176,45 +176,6 @@ python3 get_transcripts.py --help
 }
 ```
 
----
-
-## 🔄 自动化工作流
-
-### 每日自动更新
-```bash
-# 添加到crontab
-crontab -e
-
-# 每天7点自动抓取最新内容
-0 7 * * * /home/github/video_info/wrap_sunrich.sh >> /home/github/video_info/cron.log 2>&1
-
-# 每小时检查一次
-0 * * * * /home/github/video_info/auto_commit.sh
-```
-
-### GitHub Actions（可选）
-支持GitHub Actions自动同步与发布：
-
-1. 打包与发布（推送 tag 即可触发）
-   - 推送标签：
-   ```bash
-   git tag v1.0.0 && git push origin v1.0.0
-   ```
-   - 或手动在 Actions 里运行 `release` 并填写 `version`
-
-2. 产物
-   - `video_info-<version>.tar.gz`
-   - `video_info-<version>.zip`
-   - `SHA256SUMS`
-
-3. 本地手动打包（无需 Actions）
-   ```bash
-   chmod +x scripts/release_package.sh
-   VERSION=v1.0.0 ./scripts/release_package.sh
-   ls -lh dist
-   ```
-
----
 
 ## 📊 处理状态追踪
 
