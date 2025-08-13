@@ -65,6 +65,30 @@ copy_if_exists tts_cli
 # 用示例配置替代真实配置
 cp -f config.example.json "$STAGE_DIR/config.json"
 
+# 覆盖 tts_cli 配置，避免把真实语音密钥打进包
+if [[ -f "$STAGE_DIR/tts_cli/config.json" ]]; then
+    rm -f "$STAGE_DIR/tts_cli/config.json"
+fi
+if [[ -f "tts_cli/config.example.json" ]]; then
+    cp -f "tts_cli/config.example.json" "$STAGE_DIR/tts_cli/config.json"
+else
+    cat > "$STAGE_DIR/tts_cli/config.json" <<'JSON'
+{
+  "speechKey": "your-azure-key",
+  "serviceRegion": "eastasia",
+  "voiceName": "zh-CN-YunyangNeural",
+  "voiceStyle": "general",
+  "role": "",
+  "speed": 1.0,
+  "pitch": "0%",
+  "saveDir": "mk_video",
+  "retryCount": 0,
+  "retryInterval": 5,
+  "chunkLimit": 4500
+}
+JSON
+fi
+
 # 5) 附加清单：写入快速安装说明
 cat > "$STAGE_DIR/INSTALL.md" <<'MD'
 # 安装与快速开始

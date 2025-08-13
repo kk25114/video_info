@@ -1,6 +1,7 @@
 # 配置文件
 config.json
 config.local.json
+tts_cli/config.json
 
 # Python 缓存
 __pycache__
@@ -72,5 +73,7 @@ Thumbs.db
 .idea/
 .vscode/
 .history/
+scripts/release_package.sh
+scripts/release_publish.sh
 
 
