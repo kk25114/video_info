@@ -18,7 +18,7 @@ __pycache__
 .venv
 env/
 venv/
-
+.github/
 # 日志和数据目录
 *.log
 **/processed_videos.log
@@ -28,6 +28,7 @@ venv/
 
 # 忽略目录
 .claude/
+.github/
 dist/
 build/
 tts_cli/output/
