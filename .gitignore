@@ -1,12 +1,16 @@
 # 配置文件
 config.json
-.gitinroe
+config.local.json
 
 # Python 缓存
 __pycache__
 *.pyc
 *.pyo
 *.pyd
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
 
 # 虚拟环境
 .env
@@ -16,11 +20,18 @@ venv/
 
 # 日志和数据目录
 *.log
+**/processed_videos.log
+**/failed_videos.log
+**/last_processed_date.log
+**/processing.log
 
 # 忽略目录
-.claue/
-.gitinroe
- 
+.claude/
+dist/
+build/
+tts_cli/output/
+mk_video/output/
+
 # 忽略 video/ 目录及其子目录中的视频与音频文件（匹配任意层级的 video 目录）
 # 视频
 video_info/**/*.mp4
@@ -36,8 +47,30 @@ mk_video/**/*.srt
 mk_video/**/*.wav
 mk_video/images/*
 mk_video/videos/*
+**/temp_audio_*.mp3
 
 # 忽略所有音视频（仅本地保留，不上传）
 *.mp4
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.srt
+*.ass
+
+# 打包产物
+*.egg-info/
+*.whl
+*.tar
+*.gz
+*.zip
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.history/
 
 

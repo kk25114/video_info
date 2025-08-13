@@ -193,7 +193,26 @@ crontab -e
 ```
 
 ### GitHub Actions（可选）
-支持GitHub Actions自动同步，配置见 `.github/workflows/`
+支持GitHub Actions自动同步与发布：
+
+1. 打包与发布（推送 tag 即可触发）
+   - 推送标签：
+   ```bash
+   git tag v1.0.0 && git push origin v1.0.0
+   ```
+   - 或手动在 Actions 里运行 `release` 并填写 `version`
+
+2. 产物
+   - `video_info-<version>.tar.gz`
+   - `video_info-<version>.zip`
+   - `SHA256SUMS`
+
+3. 本地手动打包（无需 Actions）
+   ```bash
+   chmod +x scripts/release_package.sh
+   VERSION=v1.0.0 ./scripts/release_package.sh
+   ls -lh dist
+   ```
 
 ---
 
