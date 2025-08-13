@@ -13,6 +13,8 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,13 +30,17 @@ jobs:
       - name: Build packages
         run: |
           chmod +x scripts/release_package.sh
-          VERSION=${{ github.event.inputs.version || github.ref_name }} ./scripts/release_package.sh
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}" ./scripts/release_package.sh
+          else
+            VERSION="${{ github.ref_name }}" ./scripts/release_package.sh
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || github.event.inputs.version }}
-          name: ${{ github.ref_name || github.event.inputs.version }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
           body: |
             Automated release for ${{ github.ref_name || github.event.inputs.version }}.
             - See INSTALL.md inside the archive for quick start.

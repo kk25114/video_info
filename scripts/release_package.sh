@@ -59,8 +59,22 @@ copy_if_exists get_transcripts.py
 copy_if_exists auto_segment_chinese_text.py
 copy_if_exists auto_commit.sh
 copy_if_exists wrap_sunrich.sh
-copy_if_exists mk_video
-copy_if_exists tts_cli
+# 精选拷贝：排除大体积素材与产出目录
+if [[ -d mk_video ]]; then
+    rsync -a \
+      --exclude "videos/" \
+      --exclude "images/" \
+      --exclude "output/" \
+      --exclude "__pycache__/" \
+      mk_video "$STAGE_DIR/"
+fi
+
+if [[ -d tts_cli ]]; then
+    rsync -a \
+      --exclude "output/" \
+      --exclude "__pycache__/" \
+      tts_cli "$STAGE_DIR/"
+fi
 
 # 用示例配置替代真实配置
 cp -f config.example.json "$STAGE_DIR/config.json"
