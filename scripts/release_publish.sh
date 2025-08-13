@@ -14,6 +14,7 @@ usage() {
 用法:
   scripts/release_publish.sh --tag v1.0.0 [--title "v1.0.0"] [--notes RELEASE.md] [--mode actions|gh] [--build true|false] [--remote https://github.com/<owner>/<repo>.git]
 
+
 参数:
   --tag		版本标签(必填)，如 v1.0.0
   --title	Release 标题(可选，默认同 tag)
@@ -22,26 +23,16 @@ usage() {
   --build	是否本地打包: true|false (默认 true)
   --remote	在 actions 模式下如未配置 origin，可传入仓库地址以自动添加远端
 
+
+
+
+
+
 示例:
   # 1) 推 tag 触发 Actions 自动发布（推荐）
-  scripts/release_publish.sh --tag v0.1.0
- scripts/release_publish.sh --tag v0.1.0 --remote https://github.com/kk25114/video_info.git
-  # 2) 推 tag 并自定义标题
-  scripts/release_publish.sh --tag v0.2.0 --title "v0.2.0"
+scripts/release_publish.sh --tag v0.1.0 --remote https://github.com/kk25114/video_info.git
 
-  # 3) 只推送 tag，不在本地打包（完全交给 Actions 构建）
-  scripts/release_publish.sh --tag v0.2.0 --build false
 
-  # 4) 本地打包并用 gh CLI 直接发布（需 gh 已登录）
-  scripts/release_publish.sh --tag v0.2.0 --mode gh --notes CHANGELOG.md
-
-  # 5) gh 模式下用内联文本作为发布说明
-  scripts/release_publish.sh --tag v0.2.0 --mode gh --notes "修复:xx; 新增:yy"
-
-说明:
-  - actions 模式会创建/推送 tag 并触发 .github/workflows/release.yml
-  - gh 模式会检测同名 release 是否存在：存在则覆盖上传产物并更新标题/说明
-  - 若未指定 --title，则默认使用 --tag 作为标题
   
 进阶与常见问题:
   1) 重新发布同版本（覆盖）
