@@ -73,7 +73,7 @@ Thumbs.db
 .idea/
 .vscode/
 .history/
-scripts/release_package.sh
-scripts/release_publish.sh
+scripts
+
 
 

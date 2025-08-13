@@ -33,6 +33,16 @@ echo "-----------------------------------------"
 # 进入脚本所在的目录，以确保 git 命令在正确的仓库中执行
 cd "$(dirname "$0")"
 
+# 预处理：读取 .gitignore，停止追踪已被忽略但仍在版本库中的文件
+if [[ -f .gitignore ]]; then
+    IGNORED_TRACKED=$(git ls-files -ci --exclude-from=.gitignore || true)
+    if [[ -n "$IGNORED_TRACKED" ]]; then
+        echo "🔎 检测到已被 .gitignore 忽略但仍受版本控制的文件，准备从暂存区移除追踪："
+        echo "$IGNORED_TRACKED" | sed 's/^/ - /'
+        echo "$IGNORED_TRACKED" | xargs -r git rm -r --cached --
+    fi
+fi
+
 # 1. 检查是否有文件需要提交
 if [[ -z $(git status -s) ]]; then
     echo "✅ 工作区是干净的，没有需要提交的更改。"
