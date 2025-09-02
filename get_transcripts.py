@@ -212,7 +212,8 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
         download_command = [
-            'yt-dlp', '-x', '--audio-format', 'mp3', 
+            'yt-dlp', '--extractor-args', 'youtube:player-client=web',
+            '-x', '--audio-format', 'mp3', 
             '--audio-quality', '128K',
             '--output', audio_path, 
             video_url
