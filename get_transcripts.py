@@ -67,8 +67,13 @@ def get_video_links_from_url(youtube_url):
     """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。"""
     print(f"正在从目标链接获取所有视频 URL: {youtube_url}")
     try:
-        # 构造 yt-dlp 命令
-        command = ['yt-dlp', '--flat-playlist', '--get-url', youtube_url]
+        # 构造 yt-dlp 命令，增强反爬虫防护
+        command = [
+            'yt-dlp', 
+            '--extractor-args', 'youtube:player-client=web',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--flat-playlist', '--get-url', youtube_url
+        ]
         result = subprocess.run(
             command, capture_output=True, text=True, check=True, timeout=180
         )
@@ -213,6 +218,7 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         print(f"    1/3: 正在下载音频: {video_url}")
         download_command = [
             'yt-dlp', '--extractor-args', 'youtube:player-client=web',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-x', '--audio-format', 'mp3', 
             '--audio-quality', '128K',
             '--output', audio_path, 
@@ -322,7 +328,11 @@ def get_video_title(video_url):
     """使用 yt-dlp 获取视频的原始标题。"""
     print("--> 正在获取视频原始标题...")
     try:
-        command = ['yt-dlp', '--print', 'title', '--no-playlist', video_url]
+        command = [
+            'yt-dlp', '--extractor-args', 'youtube:player-client=web',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--print', 'title', '--no-playlist', video_url
+        ]
         result = subprocess.run(
             command, capture_output=True, text=True, check=True, timeout=30
         )
