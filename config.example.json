@@ -1,9 +1,0 @@
-{
-  "DEEPSEEK_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxx",
-  "azure_speech_key": "your-azure-key",
-  "azure_service_region": "eastasia",
-  "default_voice": "zh-CN-YunyangNeural",
-  "output_dir": "transcripts",
-  "video_quality": "720p",
-  "auto_commit": true
-}
