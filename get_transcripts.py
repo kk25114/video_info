@@ -42,7 +42,7 @@ from datetime import datetime
 
 # ---- 代理兜底设置 ----
 # 支持网络代理配置，确保在中国大陆环境也能正常访问YouTube
-PROXY = "http://192.168.199.105:10806"
+PROXY = "http://172.23.240.1:10806"
 for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
     os.environ.setdefault(key, PROXY)
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
