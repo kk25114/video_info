@@ -69,7 +69,8 @@ def get_video_links_from_url(youtube_url):
     try:
         # 构造 yt-dlp 命令，增强反爬虫防护
         command = [
-            'yt-dlp', 
+            'yt-dlp',
+            '--cookies', 'cookies.txt',
             '--extractor-args', 'youtube:player-client=mweb',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--flat-playlist', '--get-url', youtube_url
@@ -217,7 +218,9 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
         download_command = [
-            'yt-dlp', '--extractor-args', 'youtube:player-client=mweb',
+            'yt-dlp',
+            '--cookies', 'cookies.txt',
+            '--extractor-args', 'youtube:player-client=mweb',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-x', '--audio-format', 'mp3', 
             '--audio-quality', '128K',
@@ -329,7 +332,9 @@ def get_video_title(video_url):
     print("--> 正在获取视频原始标题...")
     try:
         command = [
-            'yt-dlp', '--extractor-args', 'youtube:player-client=mweb',
+            'yt-dlp',
+            '--cookies', 'cookies.txt',
+            '--extractor-args', 'youtube:player-client=mweb',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--print', 'title', '--no-playlist', video_url
         ]

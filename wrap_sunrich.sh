@@ -40,6 +40,9 @@ CHANNEL_URL="https://www.youtube.com/@sunriches/videos"
 OUTPUT_DIR="2.sunrich"
 SAVE_DIR="mk_video"
 
+# ---------- -1. 清理旧的临时文件，避免权限问题 ----------
+sudo rm -f /tmp/md_before.txt /tmp/md_after.txt
+
 # ---------- 0. 记录现有 Markdown ----------
 find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | sort > /tmp/md_before.txt
 
