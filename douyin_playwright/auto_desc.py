@@ -1,0 +1,199 @@
+"""自动从 2.sunrich 最新文稿提取简介与话题，生成 30 字内描述。"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Optional, Tuple
+
+import requests
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = REPO_ROOT / "config.json"
+SUNRICH_DIR = REPO_ROOT / "2.sunrich"
+API_URL = "https://api.deepseek.com/v1/chat/completions"
+MODEL = "deepseek-chat"
+MAX_CHARS = 30
+
+
+def _load_api_key() -> Optional[str]:
+    if not CONFIG_PATH.exists():
+        return None
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data.get("DEEPSEEK_API_KEY")
+
+
+def _latest_markdown() -> Path:
+    files = sorted(SUNRICH_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        raise FileNotFoundError(f"{SUNRICH_DIR} 中没有 Markdown 文稿")
+    return files[0]
+
+
+def _extract_sections(markdown: str) -> Tuple[str, str]:
+    intro = ""
+    topics_block = ""
+
+    intro_match = re.search(r"##\s*简介\n(.*?)(?:\n##|\Z)", markdown, re.S)
+    if intro_match:
+        intro = intro_match.group(1).strip()
+
+    topics_match = re.search(r"##\s*话题\n(.*?)(?:\n##|\Z)", markdown, re.S)
+    if topics_match:
+        topics_block = topics_match.group(1).strip()
+
+    topics_lines = []
+    for line in topics_block.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("-"):
+            token = stripped.lstrip("- ")
+            if token and not token.startswith("#"):
+                token = "#" + token
+            topics_lines.append(token)
+    topics = " ".join(filter(None, topics_lines))
+    return intro, topics
+
+
+def _clean_text(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^[0-9]+[.、．]\s*", "", cleaned)
+    cleaned = re.sub(r"^视频分析了", "", cleaned)
+    return cleaned
+
+
+def _shorten_without_cut(text: str, max_chars: int) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+
+    punctuation = [
+        m.end()
+        for m in re.finditer(r"[。！？；.!?]", text)
+        if m.end() <= max_chars
+    ]
+    if punctuation:
+        return text[: punctuation[-1]]
+
+    punctuation = [
+        m.end()
+        for m in re.finditer(r"[，、,]", text)
+        if m.end() <= max_chars
+    ]
+    if punctuation:
+        return text[: punctuation[-1]]
+
+    return text
+
+
+def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tuple[str, str]:
+    prompt = (
+        f"请阅读以下简介与话题，生成两条输出：\n"
+        f"1. 中文简介摘要，不超过{max_chars}个字。\n"
+        f"2. 中文话题串，总长度不超过{max_chars}个字，话题用空格分隔，保留#号。\n\n"
+        f"【简介】\n{intro}\n\n【话题】\n{topics}\n"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": "你是一名精简内容的中文编辑"},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.3,
+    }
+
+    resp = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    content = data["choices"][0]["message"]["content"].strip()
+
+    summary = ""
+    topics_line = ""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("简介"):
+            summary = re.sub(r"^简介[:：]\s*", "", stripped)
+        elif stripped.startswith("话题"):
+            topics_line = re.sub(r"^话题[:：]\s*", "", stripped)
+
+    if not summary:
+        summary = content.splitlines()[0]
+    if not topics_line:
+        topics_line = " ".join(re.findall(r"#\S+", content))
+
+    summary = _shorten_without_cut(_clean_text(summary), max_chars)
+    topics_line = _shorten_without_cut(_clean_text(topics_line), max_chars)
+    return summary, topics_line
+
+
+def _fallback_summary(intro: str, topics: str, max_chars: int) -> Tuple[str, str]:
+    intro_clean = re.sub(r"\s+", "", intro)
+    summary = _shorten_without_cut(_clean_text(intro_clean), max_chars)
+
+    topics_tokens = []
+    for token in topics.split():
+        clean = token.strip()
+        if clean:
+            topics_tokens.append(clean)
+    topics_str = ""
+    current = []
+    total_length = 0
+    for token in topics_tokens:
+        token_len = len(token)
+        if total_length == 0:
+            candidate_len = token_len
+        else:
+            candidate_len = total_length + 1 + token_len
+        if total_length != 0 and candidate_len > max_chars:
+            break
+        current.append(token)
+        total_length = candidate_len
+
+    topics_str = _clean_text(" ".join(current))
+    return summary, topics_str
+
+
+def generate_summary_and_topics(max_chars: int = MAX_CHARS) -> Tuple[str, str]:
+    """返回 (简介摘要, 话题串)。"""
+
+    latest = _latest_markdown()
+    intro, topics = _extract_sections(latest.read_text(encoding="utf-8"))
+    if not intro:
+        raise ValueError("未在文稿中找到 '## 简介' 段落")
+    if not topics:
+        raise ValueError("未在文稿中找到 '## 话题' 段落")
+
+    api_key = _load_api_key()
+    if api_key:
+        try:
+            return _call_deepseek(api_key, intro, topics, max_chars)
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARN: 调用 DeepSeek 失败，使用本地规则。原因: {exc}")
+
+    return _fallback_summary(intro, topics, max_chars)
+
+
+def generate_combined_string(max_chars: int = MAX_CHARS) -> str:
+    summary, topics = generate_summary_and_topics(max_chars=max_chars)
+    topics = topics.strip()
+    if not topics:
+        return summary
+    if topics.startswith("#"):
+        return f"{summary}{topics}"
+    return f"{summary} {topics}"
+
+
+__all__ = [
+    "generate_summary_and_topics",
+    "generate_combined_string",
+]

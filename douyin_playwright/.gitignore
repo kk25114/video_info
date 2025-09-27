@@ -1,0 +1,5 @@
+# 会话状态等敏感文件
+storage_state.json
+cookies/
+*.log
+__pycache__/
