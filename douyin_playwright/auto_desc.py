@@ -15,6 +15,7 @@ SUNRICH_DIR = REPO_ROOT / "2.sunrich"
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODEL = "deepseek-chat"
 MAX_CHARS = 30
+TOPIC_MAX = 5
 
 
 def _load_api_key() -> Optional[str]:
@@ -60,7 +61,18 @@ def _extract_sections(markdown: str) -> Tuple[str, str]:
 
 def _clean_text(text: str) -> str:
     cleaned = text.strip()
-    cleaned = re.sub(r"^[0-9]+[.、．]\s*", "", cleaned)
+    # 去掉开头常见的编号/子弹符号：1) 1. 1、 （1） - • · 等
+    patterns = [
+        r"^\s*[0-9]+\s*[\)）\.·、:：]\s*",   # 1) / 1. / 1、/ 1: / 1：
+        r"^\s*[（(]?[0-9]+[)）]\s*",           # (1) / （1）
+        r"^\s*[-•·]\s*",                       # - / • / ·
+        r"^\s*第[一二三四五六七八九十百千]+[、.．]\s*",  # 第一、
+        r"^\s*简介[:：]\s*",                    # 简介：
+        r"^\s*话题[:：]\s*",                    # 话题：
+    ]
+    for pat in patterns:
+        cleaned = re.sub(pat, "", cleaned)
+    # 去掉模型常见无效前缀
     cleaned = re.sub(r"^视频分析了", "", cleaned)
     return cleaned
 
@@ -89,11 +101,18 @@ def _shorten_without_cut(text: str, max_chars: int) -> str:
     return text
 
 
+def _limit_topics(line: str, max_count: int) -> str:
+    tags = re.findall(r"#\S+", line)
+    if not tags:
+        tags = [t for t in line.split() if t.strip()]
+    return " ".join(tags[:max_count])
+
+
 def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tuple[str, str]:
     prompt = (
         f"请阅读以下简介与话题，生成两条输出：\n"
-        f"1. 中文简介摘要，不超过{max_chars}个字。\n"
-        f"2. 中文话题串，总长度不超过{max_chars}个字，话题用空格分隔，保留#号。\n\n"
+        f"1. 中文简介摘要，不超过{max_chars}个字。直接回复，不要任何解释。\n"
+        f"2. 中文话题串，最多{TOPIC_MAX}个，话题用空格分隔，保留#号。\n\n"
         f"【简介】\n{intro}\n\n【话题】\n{topics}\n"
     )
 
@@ -132,7 +151,7 @@ def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tup
         topics_line = " ".join(re.findall(r"#\S+", content))
 
     summary = _shorten_without_cut(_clean_text(summary), max_chars)
-    topics_line = _shorten_without_cut(_clean_text(topics_line), max_chars)
+    topics_line = _limit_topics(_clean_text(topics_line), TOPIC_MAX)
     return summary, topics_line
 
 
@@ -145,6 +164,8 @@ def _fallback_summary(intro: str, topics: str, max_chars: int) -> Tuple[str, str
         clean = token.strip()
         if clean:
             topics_tokens.append(clean)
+    # 限制最多 N 个话题
+    topics_tokens = topics_tokens[:TOPIC_MAX]
     topics_str = ""
     current = []
     total_length = 0
