@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 /home/github/video_info/mk_video/build.py
+
+
 VIDEO_DIR="/mnt/d/Program Files/下载"
 LATEST_VIDEO=$(find "$VIDEO_DIR" -type f -name '*.mp4' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
 
