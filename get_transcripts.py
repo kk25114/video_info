@@ -38,7 +38,6 @@ import requests
 import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
-from datetime import datetime
 
 # ---- 代理兜底设置 ----
 # 支持网络代理配置，确保在中国大陆环境也能正常访问YouTube
@@ -63,40 +62,23 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
-def get_video_links_from_url(youtube_url, output_dir=None):
-    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取视频的 URL。
-    
-    Args:
-        youtube_url: YouTube频道/播放列表/视频URL
-        output_dir: 输出目录，用于读取last_processed_date.log文件
-    
-    逻辑：
-        - 如果存在 last_processed_date.log，只获取最新50个视频（4秒，快速）
-        - 如果不存在，获取所有视频（47秒，仅第一次运行）
-        - 配合Python代码检查processed_videos.log，遇到已处理视频就停止
-    
-    注：测试发现 --dateafter 在 --flat-playlist 模式下无效（不下载元数据无法判断日期）
+def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int = 20):
+    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取视频 URL 列表。
+
+    约定：
+    - 如果输出目录中已存在 `processed_videos.log`（表示非首次运行），
+      则进入“快速模式”，仅抓取最新 candidate_size 条候选视频；新增视频判定仅按“是否已处理过的ID”。
+    - 如果不存在该文件（首次运行），抓取该来源的所有视频。
+
+    说明：`--dateafter` 在 `--flat-playlist` 下无效，因此本函数只做“候选集合”抓取，
+    真正的“按上传日期过滤”放在主流程中逐条读取元数据后完成。
     """
     use_fast_mode = False
-    last_video_date = None
     if output_dir:
-        date_log_path = os.path.join(output_dir, 'last_processed_date.log')
-        video_date_log_path = os.path.join(output_dir, 'last_video_date.log')
-        
-        if os.path.exists(date_log_path):
+        processed_log_path_hint = os.path.join(output_dir, 'processed_videos.log')
+        if os.path.exists(processed_log_path_hint):
             use_fast_mode = True
-            # 尝试读取上次处理视频的上传日期
-            if os.path.exists(video_date_log_path):
-                try:
-                    with open(video_date_log_path, 'r') as f:
-                        last_video_date = f.read().strip()
-                        # 格式化日期显示：20250929 → 2025-09-29
-                        formatted_date = f"{last_video_date[:4]}-{last_video_date[4:6]}-{last_video_date[6:8]}"
-                        print(f"📅 上次处理到 {formatted_date} 的视频，使用快速模式（只获取最新50个视频，耗时~4秒）")
-                except:
-                    print(f"📅 检测到日期文件，使用快速模式（只获取最新50个视频，耗时~4秒）")
-            else:
-                print(f"📅 检测到日期文件，使用快速模式（只获取最新50个视频，耗时~4秒）")
+            print(f"📄 检测到 processed_videos.log，使用快速模式（候选取最新{candidate_size}条，按ID判定新增）")
     
     if not use_fast_mode:
         print(f"正在从目标链接获取所有视频 URL: {youtube_url}（首次运行，耗时~47秒）")
@@ -111,9 +93,9 @@ def get_video_links_from_url(youtube_url, output_dir=None):
             '--flat-playlist'
         ]
         
-        # 快速模式：只获取最新50个视频（YouTube按时间倒序，最新在前）
+        # 快速模式：只获取最新 candidate_size 个视频（YouTube按时间倒序，最新在前）
         if use_fast_mode:
-            command.extend(['--playlist-end', '50'])
+            command.extend(['--playlist-end', str(candidate_size)])
         
         command.extend(['--get-url', youtube_url])
         result = subprocess.run(
@@ -124,7 +106,7 @@ def get_video_links_from_url(youtube_url, output_dir=None):
             print("警告: 未能从提供的链接中找到任何视频。请检查链接是否有效。")
         else:
             if use_fast_mode:
-                print(f"✅ 成功获取 {len(links)} 个视频（快速模式），配合Python代码检查，遇到已处理视频会自动停止")
+                print(f"✅ 成功获取 {len(links)} 个视频（快速模式），随后将通过ID集合判定新增")
             else:
                 print(f"✅ 成功获取 {len(links)} 个视频链接")
         return links
@@ -526,8 +508,12 @@ def main(args):
     """主执行函数。"""
     check_dependencies()
     
-    # 传递 output_dir，以便函数读取日期文件进行智能过滤
-    video_links = get_video_links_from_url(args.youtube_url, output_dir=args.output_dir)
+    # 传递 output_dir 和候选窗口大小
+    video_links = get_video_links_from_url(
+        args.youtube_url,
+        output_dir=args.output_dir,
+        candidate_size=args.candidate_size
+    )
     if not video_links:
         print("未获取到任何视频链接，程序退出。")
         return
@@ -552,21 +538,15 @@ def main(args):
     skip_ids = processed_ids.union(failed_ids)
     print(f"已加载 {len(processed_ids)} 条成功记录和 {len(failed_ids)} 条失败记录。共跳过 {len(skip_ids)} 个视频。")
 
-    # 高效筛选新视频
-    print("\n正在从视频列表中查找新内容...")
+    # 仅按“ID是否已处理”判定新增（更快，满足你每日执行的节奏）
+    print("\n正在从视频列表中查找新内容（仅按ID判定）...")
     new_video_links = []
     for link in video_links:
-        video_id = get_video_id(link)
-        if not video_id:
-            print(f"无法解析视频ID，已跳过: {link}")
+        vid = get_video_id(link)
+        if not vid or vid in skip_ids:
             continue
-        
-        if video_id in skip_ids:
-            print("检测到已处理或已失败的视频，扫描停止。")
-            break
-        
         new_video_links.append(link)
-    
+
     if not new_video_links:
         print("\n没有发现需要处理的新视频。程序退出。")
         return
@@ -672,23 +652,7 @@ def main(args):
             else: # transcript_text is None
                 print(f"处理失败，检测到临时性错误，将可重试: {link}")
 
-    # 在所有视频处理完毕后，记录最后处理视频的上传日期
-    if new_video_links:
-        # 获取最后处理视频的上传日期
-        last_video_url = new_video_links[-1]  # 反转后，最后一个是最新的
-        last_video_date = get_video_upload_date(last_video_url)
-        if last_video_date:
-            date_log_path = os.path.join(args.output_dir, 'last_video_date.log')
-            with open(date_log_path, 'w', encoding='utf-8') as f:
-                f.write(last_video_date)
-            print(f"--> 已记录最后处理视频的上传日期: {last_video_date}")
-    
-    # 同时记录系统处理时间
-    now_str = datetime.now().strftime('%Y%m%d%H%M%S')
-    date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
-    with open(date_log_path, 'w', encoding='utf-8') as f:
-        f.write(now_str)
-    print(f"--> 已记录本次处理时间: {now_str}")
+    # 本方案不再记录日期文件，新增判定完全基于 ID 集合。
 
     # 如果指定了 --auto-commit，则在最后调用外部脚本执行 Git 操作
     if args.auto_commit:
@@ -744,6 +708,7 @@ if __name__ == '__main__':
     parser.add_argument('--auto-commit', action='store_true', help='在脚本成功执行后，调用 auto_commit.sh 脚本进行提交。')
     parser.add_argument('--summarize', action='store_true', help='使用 DeepSeek API 基于文稿内容生成简介和话题。')
     parser.add_argument('--correct', action='store_true', help='在生成摘要之前，对文稿进行错别字校正。')
+    parser.add_argument('--candidate-size', type=int, default=20, help='快速模式下抓取的最新候选视频数量（默认20）。')
 
     args = parser.parse_args()
     main(args)
