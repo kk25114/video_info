@@ -63,9 +63,44 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
-def get_video_links_from_url(youtube_url):
-    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取所有视频的 URL。"""
-    print(f"正在从目标链接获取所有视频 URL: {youtube_url}")
+def get_video_links_from_url(youtube_url, output_dir=None):
+    """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取视频的 URL。
+    
+    Args:
+        youtube_url: YouTube频道/播放列表/视频URL
+        output_dir: 输出目录，用于读取last_processed_date.log文件
+    
+    逻辑：
+        - 如果存在 last_processed_date.log，只获取最新50个视频（4秒，快速）
+        - 如果不存在，获取所有视频（47秒，仅第一次运行）
+        - 配合Python代码检查processed_videos.log，遇到已处理视频就停止
+    
+    注：测试发现 --dateafter 在 --flat-playlist 模式下无效（不下载元数据无法判断日期）
+    """
+    use_fast_mode = False
+    last_video_date = None
+    if output_dir:
+        date_log_path = os.path.join(output_dir, 'last_processed_date.log')
+        video_date_log_path = os.path.join(output_dir, 'last_video_date.log')
+        
+        if os.path.exists(date_log_path):
+            use_fast_mode = True
+            # 尝试读取上次处理视频的上传日期
+            if os.path.exists(video_date_log_path):
+                try:
+                    with open(video_date_log_path, 'r') as f:
+                        last_video_date = f.read().strip()
+                        # 格式化日期显示：20250929 → 2025-09-29
+                        formatted_date = f"{last_video_date[:4]}-{last_video_date[4:6]}-{last_video_date[6:8]}"
+                        print(f"📅 上次处理到 {formatted_date} 的视频，使用快速模式（只获取最新50个视频，耗时~4秒）")
+                except:
+                    print(f"📅 检测到日期文件，使用快速模式（只获取最新50个视频，耗时~4秒）")
+            else:
+                print(f"📅 检测到日期文件，使用快速模式（只获取最新50个视频，耗时~4秒）")
+    
+    if not use_fast_mode:
+        print(f"正在从目标链接获取所有视频 URL: {youtube_url}（首次运行，耗时~47秒）")
+    
     try:
         # 构造 yt-dlp 命令，增强反爬虫防护
         command = [
@@ -73,8 +108,14 @@ def get_video_links_from_url(youtube_url):
             '--cookies', 'cookies.txt',
             '--extractor-args', 'youtube:player-client=mweb',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            '--flat-playlist', '--get-url', youtube_url
+            '--flat-playlist'
         ]
+        
+        # 快速模式：只获取最新50个视频（YouTube按时间倒序，最新在前）
+        if use_fast_mode:
+            command.extend(['--playlist-end', '50'])
+        
+        command.extend(['--get-url', youtube_url])
         result = subprocess.run(
             command, capture_output=True, text=True, check=True, timeout=180
         )
@@ -82,7 +123,10 @@ def get_video_links_from_url(youtube_url):
         if not links:
             print("警告: 未能从提供的链接中找到任何视频。请检查链接是否有效。")
         else:
-            print(f"成功找到 {len(links)} 个视频链接。")
+            if use_fast_mode:
+                print(f"✅ 成功获取 {len(links)} 个视频（快速模式），配合Python代码检查，遇到已处理视频会自动停止")
+            else:
+                print(f"✅ 成功获取 {len(links)} 个视频链接")
         return links
     except subprocess.TimeoutExpired:
         print("错误: yt-dlp 获取视频列表超时 (180秒)。")
@@ -346,6 +390,23 @@ def get_video_title(video_url):
         print(f"--> 获取原始标题时出错: {e}")
         return None
 
+def get_video_upload_date(video_url):
+    """使用 yt-dlp 获取视频的上传日期。"""
+    try:
+        command = [
+            'yt-dlp',
+            '--cookies', 'cookies.txt',
+            '--extractor-args', 'youtube:player-client=mweb',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--print', '%(upload_date)s', '--no-playlist', video_url
+        ]
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=30
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        return None
+
 def generate_ai_summary(transcript_text):
     """使用 DeepSeek API 根据文稿生成简介和话题。"""
     print("--> 正在使用 DeepSeek API 生成简介和话题...")
@@ -465,7 +526,8 @@ def main(args):
     """主执行函数。"""
     check_dependencies()
     
-    video_links = get_video_links_from_url(args.youtube_url)
+    # 传递 output_dir，以便函数读取日期文件进行智能过滤
+    video_links = get_video_links_from_url(args.youtube_url, output_dir=args.output_dir)
     if not video_links:
         print("未获取到任何视频链接，程序退出。")
         return
@@ -610,12 +672,23 @@ def main(args):
             else: # transcript_text is None
                 print(f"处理失败，检测到临时性错误，将可重试: {link}")
 
-    # 在所有视频处理完毕后，使用当前系统日期时间写入 last_processed_date.log
+    # 在所有视频处理完毕后，记录最后处理视频的上传日期
+    if new_video_links:
+        # 获取最后处理视频的上传日期
+        last_video_url = new_video_links[-1]  # 反转后，最后一个是最新的
+        last_video_date = get_video_upload_date(last_video_url)
+        if last_video_date:
+            date_log_path = os.path.join(args.output_dir, 'last_video_date.log')
+            with open(date_log_path, 'w', encoding='utf-8') as f:
+                f.write(last_video_date)
+            print(f"--> 已记录最后处理视频的上传日期: {last_video_date}")
+    
+    # 同时记录系统处理时间
     now_str = datetime.now().strftime('%Y%m%d%H%M%S')
     date_log_path = os.path.join(args.output_dir, 'last_processed_date.log')
     with open(date_log_path, 'w', encoding='utf-8') as f:
         f.write(now_str)
-    print(f"--> 已记录本次处理日期时间: {now_str}")
+    print(f"--> 已记录本次处理时间: {now_str}")
 
     # 如果指定了 --auto-commit，则在最后调用外部脚本执行 Git 操作
     if args.auto_commit:
