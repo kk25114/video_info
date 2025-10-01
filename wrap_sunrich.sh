@@ -48,7 +48,7 @@ find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | sort > /tmp/md_before.txt
 
 # ---------- 1. 抓取最新视频并生成文稿 ----------
 /usr/bin/python3 get_transcripts.py "$CHANNEL_URL" \
-  --output_dir "$OUTPUT_DIR" --auto-commit --summarize --correct
+  --output_dir "$OUTPUT_DIR" --auto-commit --summarize --correct --candidate-size 7
 
 # ---------- 2. 计算新增 Markdown ----------
 find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | sort > /tmp/md_after.txt

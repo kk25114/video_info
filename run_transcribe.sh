@@ -42,5 +42,5 @@ fi
 
 /usr/bin/python3 get_transcripts.py "$CHANNEL_URL" \
   --output_dir "$OUTPUT_DIR" \
-  --auto-commit --summarize --correct \
+  --auto-commit --summarize --correct --candidate-size 7 \
   >> /home/github/video_info/cron_get_transcripts.log 2>&1
