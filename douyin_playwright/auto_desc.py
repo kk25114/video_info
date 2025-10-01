@@ -29,10 +29,25 @@ def _load_api_key() -> Optional[str]:
 
 
 def _latest_markdown() -> Path:
-    files = sorted(SUNRICH_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    """选取 2.sunrich 目录下“编号最大”的 Markdown 文稿（仅按序号，不回退 mtime）。"""
+    files = list(SUNRICH_DIR.glob("*.md"))
     if not files:
         raise FileNotFoundError(f"{SUNRICH_DIR} 中没有 Markdown 文稿")
-    return files[0]
+
+    numbered = []
+    for p in files:
+        m = re.match(r"^(\d+)", p.stem)
+        if m:
+            try:
+                numbered.append((int(m.group(1)), p))
+            except ValueError:
+                continue
+
+    if not numbered:
+        raise ValueError(f"{SUNRICH_DIR} 中没有以数字序号开头的 Markdown 文稿")
+
+    numbered.sort(key=lambda x: x[0], reverse=True)
+    return numbered[0][1]
 
 
 def _extract_sections(markdown: str) -> Tuple[str, str]:
