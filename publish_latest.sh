@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-#python3 /home/github/video_info/mk_video/build.py
+python3 /home/github/video_info/mk_video/build.py
 
 
 VIDEO_DIR="/mnt/d/Program Files/下载"
