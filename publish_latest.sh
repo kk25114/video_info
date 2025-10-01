@@ -5,37 +5,8 @@ python3 /home/github/video_info/mk_video/build.py
 
 
 VIDEO_DIR="/mnt/d/Program Files/下载"
-# 优先按“文件名前缀的连续数字最大”选择最新作品；若无编号则回退按修改时间
-LATEST_VIDEO=$(python3 - <<'PY'
-import os, re, sys, glob
-VIDEO_DIR = os.environ.get('VIDEO_DIR', '/mnt/d/Program Files/下载')
-try:
-    names = os.listdir(VIDEO_DIR)
-except FileNotFoundError:
-    names = []
-
-cands = []
-for name in names:
-    if not name.lower().endswith('.mp4'):
-        continue
-    m = re.match(r'^(\d+)', name)
-    if m:
-        try:
-            cands.append((int(m.group(1)), name))
-        except ValueError:
-            pass
-
-if cands:
-    cands.sort(key=lambda x: x[0], reverse=True)
-    print(os.path.join(VIDEO_DIR, cands[0][1]))
-else:
-    files = glob.glob(os.path.join(VIDEO_DIR, '*.mp4'))
-    if not files:
-        sys.exit(1)
-    latest = max(files, key=os.path.getmtime)
-    print(latest)
-PY
-)
+# 按“修改时间最新”选择 mp4（适配包含空格的路径）
+LATEST_VIDEO=$(find "$VIDEO_DIR" -type f -name '*.mp4' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
 
 if [[ -z "${LATEST_VIDEO:-}" ]]; then
   echo "未找到最新的 mp4 视频文件" >&2

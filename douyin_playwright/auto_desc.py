@@ -14,7 +14,7 @@ CONFIG_PATH = REPO_ROOT / "config.json"
 SUNRICH_DIR = REPO_ROOT / "2.sunrich"
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODEL = "deepseek-chat"
-MAX_CHARS = 45
+MAX_CHARS = 50
 TOPIC_MAX = 5
 
 
