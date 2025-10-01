@@ -1,4 +1,4 @@
-"""自动从 2.sunrich 最新文稿提取简介与话题，生成 30 字内描述。"""
+"""自动从 2.sunrich 最新文稿提取简介与话题，生成 45 字内描述。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ CONFIG_PATH = REPO_ROOT / "config.json"
 SUNRICH_DIR = REPO_ROOT / "2.sunrich"
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODEL = "deepseek-chat"
-MAX_CHARS = 30
+MAX_CHARS = 45
 TOPIC_MAX = 5
 
 
