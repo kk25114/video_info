@@ -126,17 +126,7 @@ def sanitize_filename(title):
     sanitized = sanitized.replace(' ', '_')
     return sanitized[:100]
 
-def get_video_upload_date(video_url):
-    """使用 yt-dlp 获取视频的上传日期 (格式: YYYYMMDD)。"""
-    try:
-        result = subprocess.run(
-            ['yt-dlp', '--print', '%(upload_date)s', video_url],
-            capture_output=True, text=True, check=True
-        )
-        return result.stdout.strip()
-    except Exception:
-        # 不打印错误，因为这可能在主流程中只是一个尝试
-        return None
+
 
 def get_video_id(url):
     """从 URL 中提取 YouTube 视频 ID。"""
@@ -389,23 +379,33 @@ def get_video_upload_date(video_url):
     except Exception as e:
         return None
 
+def get_deepseek_api_key():
+    """从 config.json 或环境变量中安全地加载 DeepSeek API Key。"""
+    config_path = 'config.json'
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                api_key = config.get("DEEPSEEK_API_KEY")
+                if api_key:
+                    return api_key
+        except (json.JSONDecodeError, IOError):
+            print(f"警告: 读取或解析 '{config_path}' 文件时出错。")
+    
+    # 如果文件中没有，可以尝试从环境变量读取
+    api_key_env = os.environ.get("DEEPSEEK_API_KEY")
+    if api_key_env:
+        return api_key_env
+        
+    return None
+
 def generate_ai_summary(transcript_text):
     """使用 DeepSeek API 根据文稿生成简介和话题。"""
     print("--> 正在使用 DeepSeek API 生成简介和话题...")
     
-    config_path = 'config.json'
-    api_key = None
-    
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            try:
-                config = json.load(f)
-                api_key = config.get("DEEPSEEK_API_KEY")
-            except json.JSONDecodeError:
-                print(f"    -> 警告: '{config_path}' 文件格式错误，不是有效的 JSON。")
-    
+    api_key = get_deepseek_api_key()
     if not api_key:
-        print(f"    -> 警告: 未在 '{config_path}' 文件中找到 'DEEPSEEK_API_KEY'。已跳过此步骤。")
+        print(f"    -> 警告: 未找到 DeepSeek API Key。已跳过此步骤。")
         return None
 
     api_url = "https://api.deepseek.com/chat/completions"
@@ -462,14 +462,7 @@ def correct_transcript_with_deepseek(transcript_text):
     """调用 DeepSeek API，对文稿进行错别字校正，并保持原有段落结构。"""
     print("--> 正在使用 DeepSeek API 进行错别字校正...")
 
-    config_path = 'config.json'
-    api_key = None
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                api_key = json.load(f).get("DEEPSEEK_API_KEY")
-        except Exception:
-            pass
+    api_key = get_deepseek_api_key()
 
     if not api_key:
         print("    -> 未找到 DEEPSEEK_API_KEY，跳过校正。")

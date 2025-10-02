@@ -5,8 +5,8 @@ python3 /home/github/video_info/mk_video/build.py
 
 
 VIDEO_DIR="/mnt/d/Program Files/下载"
-# 按“修改时间最新”选择 mp4（适配包含空格的路径）
-LATEST_VIDEO=$(find "$VIDEO_DIR" -type f -name '*.mp4' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)
+# 非递归、按修改时间倒序列出后取第一个（更快）；路径含空格也安全
+LATEST_VIDEO=$(ls -t -- "$VIDEO_DIR"/*.mp4 2>/dev/null | head -n1)
 
 if [[ -z "${LATEST_VIDEO:-}" ]]; then
   echo "未找到最新的 mp4 视频文件" >&2

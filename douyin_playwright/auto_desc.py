@@ -14,7 +14,7 @@ CONFIG_PATH = REPO_ROOT / "config.json"
 SUNRICH_DIR = REPO_ROOT / "2.sunrich"
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 MODEL = "deepseek-chat"
-MAX_CHARS = 50
+MAX_CHARS = 60
 TOPIC_MAX = 5
 
 
@@ -200,7 +200,9 @@ def _fallback_summary(intro: str, topics: str, max_chars: int) -> Tuple[str, str
 
 
 def generate_summary_and_topics(max_chars: int = MAX_CHARS) -> Tuple[str, str]:
-    """返回 (简介摘要, 话题串)。"""
+    """返回 (简介摘要, 话题串)。
+    要求必须调用 DeepSeek 生成；若未配置或调用失败，则直接报错，不做本地兜底。
+    """
 
     latest = _latest_markdown()
     intro, topics = _extract_sections(latest.read_text(encoding="utf-8"))
@@ -210,13 +212,11 @@ def generate_summary_and_topics(max_chars: int = MAX_CHARS) -> Tuple[str, str]:
         raise ValueError("未在文稿中找到 '## 话题' 段落")
 
     api_key = _load_api_key()
-    if api_key:
-        try:
-            return _call_deepseek(api_key, intro, topics, max_chars)
-        except Exception as exc:  # noqa: BLE001
-            print(f"WARN: 调用 DeepSeek 失败，使用本地规则。原因: {exc}")
+    if not api_key:
+        raise RuntimeError(f"未配置 DeepSeek API Key，请在 {CONFIG_PATH} 中设置 DEEPSEEK_API_KEY")
 
-    return _fallback_summary(intro, topics, max_chars)
+    # 仅走 AI 路径；失败即抛错
+    return _call_deepseek(api_key, intro, topics, max_chars)
 
 
 def generate_combined_string(max_chars: int = MAX_CHARS) -> str:
