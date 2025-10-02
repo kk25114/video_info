@@ -25,7 +25,65 @@
 输出：
     shots/overlay_001_123.4s.png  # 第1个叠图，出现时刻123.4秒
 """
-import cv2, numpy as np, argparse, os, math, hashlib, subprocess, shlex, json
+import cv2, numpy as np, os, math, hashlib, subprocess, shlex, json, re, requests
+
+def analyze_text_with_deepseek(text: str):
+    """使用 DeepSeek API 分析文本，返回摘要和关键词。"""
+    print("🤖 调用 DeepSeek API 进行内容分析...")
+    config_path = '/home/github/video_info/config.json'
+    api_key = None
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                api_key = json.load(f).get("DEEPSEEK_API_KEY")
+        except Exception as e:
+            print(f"⚠️ 读取配置文件 {config_path} 时出错: {e}")
+
+    if not api_key:
+        print("❌ 错误: 未在 config.json 中找到 DEEPSEEK_API_KEY，无法进行 AI 分析。")
+        return None
+
+    api_url = "https://api.deepseek.com/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    prompt = (
+        "你是一名资深新闻编辑。请阅读以下视频文稿，并以严格的 JSON 格式完成两项任务：\n"
+        "1. `summary`: 生成一段不超过150字的摘要，精准概括文稿讨论的核心新闻事件。\n"
+        "2. `keywords`: 提取3个最适合用于搜索相关新闻的关键词（字符串数组）。\n\n"
+        "确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\n\n"
+        "--- 文稿开始 ---\n"
+        f"{text}\n"
+        "--- 文稿结束 ---"
+    )
+
+    data = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        response.raise_for_status()
+        content_str = response.json()['choices'][0]['message']['content']
+        analysis_data = json.loads(content_str)
+        
+        if 'summary' in analysis_data and 'keywords' in analysis_data:
+            print("✅ AI 内容分析完成。")
+            return analysis_data
+        else:
+            print("❌ 错误: AI 返回的 JSON 格式不符合预期。")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"❌ 错误: 调用 DeepSeek API 时出错: {e}")
+        return None
+    except (KeyError, IndexError, json.JSONDecodeError) as e:
+        print(f"❌ 错误: 解析 AI 响应时出错: {e}")
+        return None
+
 from pathlib import Path
 from tqdm import tqdm
 
@@ -139,78 +197,11 @@ def iou(boxA, boxB):
     union = boxA[2]*boxA[3] + boxB[2]*boxB[3] - inter
     return inter / union
 
-def build_background_model(video_path: str, sample_count: int = 50):
-    """构建背景模型，用于分离叠加图片"""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise IOError(f"无法打开视频构建背景: {video_path}")
-    
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if total_frames == 0:
-        cap.release()
-        return None
-    
-    print(f"🎬 构建背景模型，采样 {sample_count} 帧...")
-    frames = []
-    step = max(1, total_frames // sample_count)
-    
-    for i in range(0, total_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-        ret, frame = cap.read()
-        if ret:
-            frames.append(frame.astype(np.float32))
-        if len(frames) >= sample_count:
-            break
-    
-    cap.release()
-    
-    if not frames:
-        return None
-    
-    # 返回中位数背景（排除叠图影响）
-    background = np.median(frames, axis=0).astype(np.uint8)
-    print(f"✅ 背景模型构建完成，基于 {len(frames)} 帧")
-    return background
 
-def build_background_model(video_path: str, sample_count: int = 50):
-    """构建背景模型 - 用于分离背景视频和叠加图片"""
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    if total_frames == 0:
-        cap.release()
-        return None
-    
-    frames = []
-    step = max(1, total_frames // sample_count)
-    
-    print(f"🎬 构建背景模型: 从 {total_frames} 帧中采样 {sample_count} 帧")
-    
-    for i in range(0, total_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-        ret, frame = cap.read()
-        if ret:
-            frames.append(frame.astype(np.float32))
-        if len(frames) >= sample_count:
-            break
-    
-    cap.release()
-    
-    if not frames:
-        return None
-    
-    # 使用中位数作为背景（更好地排除叠图影响）
-    background = np.median(frames, axis=0).astype(np.uint8)
-    print(f"✅ 背景模型构建完成")
-    
-    return background
+
+
 
 def detect_overlays(video_path: str, out_dir: Path, sample_fps: int = DEFAULT_SAMPLE_FPS, diff_thresh: int = DIFF_THRESH, area_ratio_thresh: float = AREA_THRESH_RATIO, min_persist_sec: float = MIN_PERSIST_SEC, bottom_ignore_ratio: float = BOTTOM_IGNORE_RATIO):
-    # 先构建背景模型
-    background = build_background_model(video_path)
-    if background is None:
-        raise IOError(f"无法构建背景模型: {video_path}")
-    
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise IOError(f"无法打开视频: {video_path}")
@@ -239,19 +230,14 @@ def detect_overlays(video_path: str, out_dir: Path, sample_fps: int = DEFAULT_SA
         ts = frame_id / orig_fps
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # 背景减除：找出与背景不同的区域（叠加图片）
-        bg_gray = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY)
-        diff_from_bg = cv2.absdiff(gray, bg_gray)
-        _, bg_mask = cv2.threshold(diff_from_bg, 25, 255, cv2.THRESH_BINARY)
-        
         # 原有的帧间差分（用于检测静止）
         if prev_gray is None:
             prev_gray = gray.copy(); continue
         diff = cv2.absdiff(gray, prev_gray)
         _, static_mask = cv2.threshold(diff, diff_thresh, 255, cv2.THRESH_BINARY_INV)
         
-        # 结合两个掩码：既与背景不同，又相对静止的区域
-        mask_static = cv2.bitwise_and(bg_mask, static_mask)
+        # 使用帧间差分的结果作为唯一的掩码
+        mask_static = static_mask
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         clean = cv2.morphologyEx(mask_static, cv2.MORPH_OPEN, kernel, iterations=2)
         contours, _ = cv2.findContours(clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -335,88 +321,72 @@ def detect_overlays(video_path: str, out_dir: Path, sample_fps: int = DEFAULT_SA
                 saved_images.append(trk.original_image.copy())
     pbar.close(); cap.release(); print(f"🎉 完成，共识别并保存 {saved_count} 张叠图。")
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="自动下载(可选) + 转码 + 识别叠加图片")
-    parser.add_argument("source", help="本地视频文件路径或在线视频 URL")
-    parser.add_argument("-o", "--output", default="extracted_images", help="输出目录")
-    parser.add_argument("--sample_fps", type=int, default=DEFAULT_SAMPLE_FPS, help="检测时每秒抽多少帧 (默认3)")
-    parser.add_argument("--diff", type=int, default=DIFF_THRESH, help="像素灰度差阈值 (默认8)")
-    parser.add_argument("--area", type=float, default=AREA_THRESH_RATIO, help="叠图最小面积比例 (默认0.02)")
-    parser.add_argument("--persist", type=float, default=MIN_PERSIST_SEC, help="叠图最短持续时间 (秒, 默认2.0)")
-    parser.add_argument("--ignore_bottom", type=float, default=BOTTOM_IGNORE_RATIO, help="从底部忽略的高度比例 (0~1, 默认0.18)")
-    parser.add_argument("--browser", default="chrome", help="下载 YouTube 时自动提取的浏览器名 (默认: chrome)")
-    args = parser.parse_args()
+def parse_srt_file(file_path: str) -> str:
+    """读取 SRT 文件并提取所有文本内容。"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # 使用正则表达式移除序号、时间戳和空行，只留下文本
+        text_only = re.sub(r'\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\n', '', content)
+        return text_only.strip()
+    except FileNotFoundError:
+        print(f"❌ 错误: 字幕文件未找到 -> {file_path}")
+        return ""
+    except Exception as e:
+        print(f"❌ 读取或解析 SRT 文件时出错: {e}")
+        return ""
 
-    out_dir = Path(args.output)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # -------- 清理旧的图片 --------
-    for p in out_dir.glob("*.png"):
-        if p.name != "download.png":  # 保留非截图文件
-            try:
-                p.unlink()
-            except Exception:
-                pass
+def find_latest_srt_file():
+    """自动查找 mk_video 目录下最新的 .srt 字幕文件。"""
+    mk_video_dir = "/home/github/video_info/mk_video/"
+    if not os.path.exists(mk_video_dir):
+        print(f"❌ 错误: 目录不存在 -> {mk_video_dir}")
+        return None
 
-    src = args.source
+    srt_files = []
+    for filename in os.listdir(mk_video_dir):
+        if filename.endswith('.srt'):
+            file_path = os.path.join(mk_video_dir, filename)
+            mtime = os.path.getmtime(file_path)
+            srt_files.append((mtime, file_path, filename))
 
-    # -------- Step 1: 如为 URL 则先下载 --------
-    if src.startswith("http://") or src.startswith("https://"):
-        import re, urllib.parse
-        vid_match = re.search(r"[?&]v=([\w-]{11})", src)
-        vid = vid_match.group(1) if vid_match else "video"
-        download_path = out_dir / f"{vid}.webm"
-        if download_path.exists():
-            print(f"📂 已存在 {download_path}，跳过下载")
-        else:
-            print(f"🌐 下载视频 → {download_path}")
-            cmd = [
-            "yt-dlp",
-            "--cookies-from-browser", args.browser,
-            "-f", "bestvideo+bestaudio",
-            "--merge-output-format", "webm",
-            "-o", str(download_path),
-            src
-        ]
-            subprocess.run(cmd, check=True)
-        src = str(download_path)
+    if not srt_files:
+        print(f"❌ 错误: 在 {mk_video_dir} 中未找到 .srt 字幕文件")
+        return None
 
-    # -------- Step 2: 转码为 H.264 MP4 --------
-    converted_path = out_dir / (Path(src).stem + "_h264.mp4")
+    # 按修改时间排序，取最新的文件
+    srt_files.sort(reverse=True)
+    latest_file = srt_files[0][1]
+    print(f"📁 找到 {len(srt_files)} 个字幕文件，使用最新的: {srt_files[0][2]}")
+    return latest_file
 
-    def video_codec(path:str) -> str:
-        try:
-            probe = subprocess.check_output([
-                "ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=codec_name","-of","json",path
-            ], stderr=subprocess.DEVNULL)
-            info = json.loads(probe)
-            return info["streams"][0]["codec_name"]
-        except Exception:
-            return "unknown"
+import cv2, numpy as np, argparse, os, math, hashlib, subprocess, shlex, json, re, requests\n\ndef parse_srt_file(file_path: str) -> str:\n    \"\"\"读取 SRT 文件并提取所有文本内容。\"\"\"\n    try:\n        with open(file_path, \'r\', encoding=\'utf-8\') as f:\n            content = f.read()\n        # 使用正则表达式移除序号、时间戳和空行，只留下文本\n        text_only = re.sub(r\'\\d+\\n\\d{2}:\\d{2}:\\d{2},\\d{3} --> \\d{2}:\\d{2}:\\d{2},\\d{3}\\n\', \'\', content)\n        return text_only.strip()\n    except FileNotFoundError:\n        print(f\"❌ 错误: 字幕文件未找到 -> {file_path}\")\n        return \"\"\n    except Exception as e:\n        print(f\"❌ 读取或解析 SRT 文件时出错: {e}\")\n        return \"\"\n\ndef analyze_text_with_deepseek(text: str):\n    \"\"\"使用 DeepSeek API 分析文本，返回摘要和关键词。\"\"\"\n    print(\"🤖 调用 DeepSeek API 进行内容分析...\")\n    config_path = \'/home/github/video_info/config.json\'\n    api_key = None\n    if os.path.exists(config_path):\n        try:\n            with open(config_path, \'r\', encoding=\'utf-8\') as f:\n                api_key = json.load(f).get(\"DEEPSEEK_API_KEY\")\n        except Exception as e:\n            print(f\"⚠️ 读取配置文件 {config_path} 时出错: {e}\")\n\n    if not api_key:\n        print(\"❌ 错误: 未在 config.json 中找到 DEEPSEEK_API_KEY，无法进行 AI 分析。\")\n        return None\n\n    api_url = \"https://api.deepseek.com/chat/completions\"\n    headers = {\n        \"Authorization\": f\"Bearer {api_key}\",\n        \"Content-Type\": \"application/json\",\n    }\n\n    prompt = (\n        \"你是一名资深新闻编辑。请阅读以下视频文稿，并以严格的 JSON 格式完成两项任务：\\n\"\n        \"1. `summary`: 生成一段不超过150字的摘要，精准概括文稿讨论的核心新闻事件。\\n\"\n        \"2. `keywords`: 提取3个最适合用于搜索相关新闻的关键词（字符串数组）。\\n\\n\"\n        \"确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\\n\\n\"\n        \"--- 文稿开始 ---\\n\"\n        f\"{text}\\n\"\n        \"--- 文稿结束 ---\"\n    )\n\n    data = {\n        \"model\": \"deepseek-chat\",\n        \"messages\": [{\"role\": \"user\", \"content\": prompt}],\n        \"response_format\": {\"type\": \"json_object\"}\n    }\n\n    try:\n        response = requests.post(api_url, headers=headers, json=data, timeout=180)\n        response.raise_for_status()\n        content_str = response.json()[\'choices\'][0][\'message\'][\'content\']\n        analysis_data = json.loads(content_str)\n        \n        if \'summary\' in analysis_data and \'keywords\' in analysis_data:\n            print(\"✅ AI 内容分析完成。\")\n            return analysis_data\n        else:\n            print(\"❌ 错误: AI 返回的 JSON 格式不符合预期。\")\n            return None\n    except requests.exceptions.RequestException as e:\n        print(f\"❌ 错误: 调用 DeepSeek API 时出错: {e}\")\n        return None\n    except (KeyError, IndexError, json.JSONDecodeError) as e:\n        print(f\"❌ 错误: 解析 AI 响应时出错: {e}\")\n        return None\n\ndef search_recent_articles(keywords: list) -> list:\n    \"\"\"使用关键词搜索最近一周的热门文章，返回文章URL列表。\"\"\"\n    print(f\"🌐 正在搜索最近一周的热门文章，关键词: {keywords}...\")\n    query = \" \".join(keywords) + \" 最新一周\"\n    # 使用 default_api.google_web_search 工具进行搜索\n    search_results = default_api.google_web_search(query=query)\n    \n    articles = []\n    if search_results and \'output\' in search_results:\n        # 假设搜索结果是文本，需要解析出URL\n        # 这是一个简化的解析，实际可能需要更复杂的正则或HTML解析\n        # 目前我们只提取看起来像URL的字符串\n        urls = re.findall(r\'(https?://[^\s]+)\', search_results[\'output\'])\n        # 过滤掉一些明显不是文章链接的URL，例如图片链接、PDF等\n        articles = [url for url in urls if not any(ext in url for ext in [\'.png\', \'.jpg\', \'.pdf\', \'.gif\'])]\n        print(f\"✅ 找到 {len(articles)} 篇文章链接。\")\n    else:\n        print(\"⚠️ 未找到相关文章。\")\n    return articles\n\ndef main():
+    # 自动查找最新的字幕文件
+    srt_file = find_latest_srt_file()
+    if not srt_file:
+        return
 
-    need_convert = True
-    if converted_path.exists():
-        if video_codec(str(converted_path)) == "h264":
-            need_convert = False
-    if need_convert:
-        print(f"🎬 转码为 H.264 MP4 → {converted_path}")
-        cmd = [
-            "ffmpeg", "-y", "-i", src,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-            "-c:a", "copy",
-            str(converted_path)
-        ]
-        subprocess.run(cmd, check=True)
-    else:
-        print(f"📂 已存在 H.264 文件 {converted_path}，跳过转码")
+    print(f"🚀 开始处理字幕文件: {srt_file}")
 
-    # -------- Step 3: 识别叠图 --------
-    detect_overlays(str(converted_path), out_dir,
-                    sample_fps=args.sample_fps,
-                    diff_thresh=args.diff,
-                    area_ratio_thresh=args.area,
-                    min_persist_sec=args.persist,
-                    bottom_ignore_ratio=args.ignore_bottom)
+    srt_text = parse_srt_file(srt_file)
+    if not srt_text:
+        return
+
+    print("\n---")
+    print("📝 提取的字幕文本内容:")
+    print(srt_text[:500] + "..." if len(srt_text) > 500 else srt_text)
+    print("---")
+
+    # 2. AI 总结字幕内容并提取关键词
+    analysis_result = analyze_text_with_deepseek(srt_text)
+    if not analysis_result:
+        return
+
+    print("\n---")
+    print("🤖 AI 分析结果:")
+    print(f"  - 摘要: {analysis_result.get('summary')}")
+    print(f"  - 关键词: {analysis_result.get('keywords')}")
+    print("---")
 
 if __name__ == "__main__":
     main()
