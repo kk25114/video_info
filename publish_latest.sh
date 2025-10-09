@@ -18,6 +18,7 @@ echo "使用最新视频: $LATEST_VIDEO"
 python3 /home/github/video_info/douyin_playwright/scripts/publish_video.py \
   --video "$LATEST_VIDEO" \
   --auto-desc \
+  --caption-mode desc \
   --state-path /home/github/video_info/douyin_playwright/storage_state.json \
   --wait-upload-text "上传成功" \
   --publish-selector 'button.button-dhlUZE.primary-cECiOJ.fixed-J9O8Yw' \
