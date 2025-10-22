@@ -49,6 +49,57 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 # 全局变量，用于懒加载 ASR 模型，避免重复加载
 asr_model = None
 
+def _read_json_bool(obj, key, default=None):
+    try:
+        val = obj.get(key)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            low = val.strip().lower()
+            if low in ("1", "true", "yes", "on"): return True
+            if low in ("0", "false", "no", "off"): return False
+    except Exception:
+        pass
+    return default
+
+def should_deepseek_use_proxy(default=False):
+    """是否让 DeepSeek 请求走代理。
+    优先级：环境变量 DEEPSEEK_USE_PROXY > config.json: DEEPSEEK_USE_PROXY > default
+    用户当前诉求：DeepSeek 不走代理，因此默认值设为 False。
+    """
+    # 环境变量优先
+    env_val = os.environ.get("DEEPSEEK_USE_PROXY")
+    if env_val is not None:
+        env_low = env_val.strip().lower()
+        if env_low in ("1", "true", "yes", "on"):
+            return True
+        if env_low in ("0", "false", "no", "off"):
+            return False
+
+    # config.json 次之
+    cfg = 'config.json'
+    if os.path.exists(cfg):
+        try:
+            with open(cfg, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                val = _read_json_bool(data, 'DEEPSEEK_USE_PROXY', default=None)
+                if val is not None:
+                    return val
+        except Exception:
+            pass
+    return default
+
+def build_deepseek_session():
+    """创建用于访问 DeepSeek 的会话，按配置决定是否走代理。"""
+    s = requests.Session()
+    use_proxy = should_deepseek_use_proxy(default=False)
+    # 当不走代理时，忽略环境中的代理设置
+    if not use_proxy:
+        s.trust_env = False
+        s.proxies = {}
+    # 走代理时，沿用环境变量（wrap/代码已设置 HTTP(S)_PROXY）
+    return s
+
 def get_youtube_po_token():
     """从环境变量或 config.json 读取 YouTube GVS PO Token。优先环境变量。"""
     token = os.environ.get('YT_PO_TOKEN')
@@ -253,7 +304,8 @@ def summarize_with_deepseek(transcript_text):
 
     try:
         print(f"    1/2: 正在向 DeepSeek API (deepseek-chat) 发送请求...")
-        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        session = build_deepseek_session()
+        response = session.post(api_url, headers=headers, json=data, timeout=180)
         response.raise_for_status()
         print("    2/2: 已收到 API 响应。")
         
@@ -502,7 +554,8 @@ def generate_ai_summary(transcript_text):
 
     try:
         print("    1/2: 正在向 DeepSeek API 发送请求...")
-        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        session = build_deepseek_session()
+        response = session.post(api_url, headers=headers, json=data, timeout=180)
         response.raise_for_status()
         print("    2/2: 已收到 API 响应。")
         
@@ -558,7 +611,8 @@ def correct_transcript_with_deepseek(transcript_text):
     }
 
     try:
-        resp = requests.post(api_url, headers=headers, json=data, timeout=180)
+        session = build_deepseek_session()
+        resp = session.post(api_url, headers=headers, json=data, timeout=180)
         resp.raise_for_status()
         corrected = resp.json()['choices'][0]['message']['content'].strip()
         return corrected if corrected else transcript_text
