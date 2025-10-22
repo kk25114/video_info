@@ -306,26 +306,10 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 cmd[1:1] = ['--cookies', ck]
             return cmd
 
-        def build_tv_cmd(with_cookies: bool):
-            extractor_args = build_youtube_extractor_args('tv')
-            cmd = [
-                'yt-dlp',
-                '--extractor-args', extractor_args,
-                '-f', 'ba/b',
-                '--no-playlist',
-                '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
-                '--output', audio_path,
-                video_url
-            ]
-            if with_cookies and ck:
-                cmd[1:1] = ['--cookies', ck]
-            return cmd
-
+        # 仅保留两种策略：自适应(带cookies) -> 自适应(不带cookies)
         strategies = [
             ("自适应(带cookies)", build_auto_cmd(True)),
             ("自适应(不带cookies)", build_auto_cmd(False)),
-            ("TV直链(带cookies)", build_tv_cmd(True)),
-            ("TV直链(不带cookies)", build_tv_cmd(False)),
         ]
 
         last_err = None
@@ -337,12 +321,8 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 break
             except subprocess.CalledProcessError as e_try:
                 last_err = e_try
-                # 简要分类错误，继续尝试下一策略
-                err_text = (e_try.stderr or "").lower()
-                if '403' in err_text or 'forbidden' in err_text:
-                    print(f"    -> 下载失败(403): {desc}")
-                else:
-                    print(f"    -> 下载失败: {desc}: {e_try.stderr.strip() if e_try.stderr else e_try}")
+                # 简要提示后继续尝试下一策略
+                print(f"    -> 下载失败: {desc}")
         else:
             # 所有策略均失败
             raise last_err if last_err else subprocess.CalledProcessError(1, strategies[-1][1], stderr='all strategies failed')
@@ -417,12 +397,10 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {e.stderr.strip()}")
             return "permanent_failure" # 返回一个特殊信号
         else:
-            # 命中 PO Token 缺失或 403 的场景，给出明确提示
-            if 'po token' in error_output or '403' in error_output:
-                print("--> [下载403或PO Token缺失] 当前YouTube对HTTPS直链启用校验。")
-                print("    解决方案A（推荐）: 设置环境变量 YT_PO_TOKEN=tv.gvs+xxxx 并重试。")
-                print("    解决方案B: 在浏览器中登录YouTube并用浏览器扩展导出cookies，保存到 cookie.txt。")
-                print("    解决方案C: 使用自适应模式（已内置），或设置 YT_PO_TOKEN 后再试。")
+            # 多策略均失败：给出简要指引
+            if '403' in error_output or 'forbidden' in error_output:
+                print("--> [下载403/受限] 平台限制或风控所致。已尝试 带/不带cookies 的自适应下载。")
+                print("    建议：更新 /home/github/video_info/cookies.txt 或稍后重试；必要时更换网络环境。")
             print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {e.stderr.strip()}")
             return None # 返回 None 代表临时失败
 
