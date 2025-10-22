@@ -87,8 +87,8 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
         # 构造 yt-dlp 命令，增强反爬虫防护
         command = [
             'yt-dlp',
-            '--cookies', 'cookies.txt',
-            '--extractor-args', 'youtube:player-client=mweb',
+            '--cookies', 'cookie.txt',
+            '--extractor-args', 'youtube:player-client=tv',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--flat-playlist'
         ]
@@ -233,10 +233,16 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
+        po_token = os.environ.get('YT_PO_TOKEN')
+        extractor_arg_value = (
+            f"youtube:player-client=tv,po_token={po_token}" if po_token else
+            "youtube:player-client=tv"
+        )
         download_command = [
             'yt-dlp',
-            '--cookies', 'cookies.txt',
-            '--extractor-args', 'youtube:player-client=mweb',
+            '--cookies', 'cookie.txt',
+            '--extractor-args', extractor_arg_value,
+            '-f', 'ba/b',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-x', '--audio-format', 'mp3', 
             '--audio-quality', '128K',
@@ -315,6 +321,12 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {e.stderr.strip()}")
             return "permanent_failure" # 返回一个特殊信号
         else:
+            # 命中 PO Token 缺失或 403 的场景，给出明确提示
+            if 'po token' in error_output or '403' in error_output:
+                print("--> [下载403或PO Token缺失] 当前YouTube对HTTPS直链启用校验。")
+                print("    解决方案A（推荐）: 设置环境变量 YT_PO_TOKEN=tv.gvs+xxxx 并重试。")
+                print("    解决方案B: 在浏览器中登录YouTube并用浏览器扩展导出cookies，保存到 cookie.txt。")
+                print("    解决方案C: 手动在 get_transcripts.py 中将 player-client 切换或临时改为 web，再试。")
             print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {e.stderr.strip()}")
             return None # 返回 None 代表临时失败
 
@@ -349,8 +361,8 @@ def get_video_title(video_url):
     try:
         command = [
             'yt-dlp',
-            '--cookies', 'cookies.txt',
-            '--extractor-args', 'youtube:player-client=mweb',
+            '--cookies', 'cookie.txt',
+            '--extractor-args', 'youtube:player-client=tv',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--print', 'title', '--no-playlist', video_url
         ]
@@ -367,8 +379,8 @@ def get_video_upload_date(video_url):
     try:
         command = [
             'yt-dlp',
-            '--cookies', 'cookies.txt',
-            '--extractor-args', 'youtube:player-client=mweb',
+            '--cookies', 'cookie.txt',
+            '--extractor-args', 'youtube:player-client=tv',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--print', '%(upload_date)s', '--no-playlist', video_url
         ]
