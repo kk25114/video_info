@@ -257,18 +257,49 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
-        download_command = [
+
+        # 1.1 自适应模式（不强制客户端），参考 spacedownload/m4a_download.py
+        def _choose_youtube_cookies():
+            candidates = [
+                '/home/github/spacedownload/cookies_youtube.txt',
+                os.path.join(os.getcwd(), 'cookie.txt'),
+                os.path.join(os.getcwd(), 'cookies.txt'),
+            ]
+            for p in candidates:
+                if os.path.isfile(p):
+                    return p
+            return None
+
+        ck = _choose_youtube_cookies()
+
+        auto_cmd = [
             'yt-dlp',
-            '--cookies', 'cookie.txt',
-            '--extractor-args', build_youtube_extractor_args('tv'),
-            '-f', 'ba/b',
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            '-x', '--audio-format', 'mp3', 
-            '--audio-quality', '128K',
-            '--output', audio_path, 
+            '-f', 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best',
+            '--hls-prefer-native', '--concurrent-fragments', '16',
+            '--no-playlist',
+            '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
+            '--output', audio_path,
             video_url
         ]
-        subprocess.run(download_command, check=True, capture_output=True, text=True)
+        if ck:
+            auto_cmd[1:1] = ['--cookies', ck]
+
+        try:
+            subprocess.run(auto_cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError:
+            # 1.2 若自适应失败，回退至 TV 客户端（可附带 PO Token），仅取音频轨
+            tv_cmd = [
+                'yt-dlp',
+                '--extractor-args', build_youtube_extractor_args('tv'),
+                '-f', 'ba/b',
+                '--no-playlist',
+                '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
+                '--output', audio_path,
+                video_url
+            ]
+            if ck:
+                tv_cmd[1:1] = ['--cookies', ck]
+            subprocess.run(tv_cmd, check=True, capture_output=True, text=True)
 
         # 2. 根据选择加载模型并转录
         transcript_text = ""
@@ -345,7 +376,7 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 print("--> [下载403或PO Token缺失] 当前YouTube对HTTPS直链启用校验。")
                 print("    解决方案A（推荐）: 设置环境变量 YT_PO_TOKEN=tv.gvs+xxxx 并重试。")
                 print("    解决方案B: 在浏览器中登录YouTube并用浏览器扩展导出cookies，保存到 cookie.txt。")
-                print("    解决方案C: 手动在 get_transcripts.py 中将 player-client 切换或临时改为 web，再试。")
+                print("    解决方案C: 使用自适应模式（已内置），或设置 YT_PO_TOKEN 后再试。")
             print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {e.stderr.strip()}")
             return None # 返回 None 代表临时失败
 

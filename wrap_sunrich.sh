@@ -36,6 +36,29 @@ export NO_PROXY="localhost,127.0.0.1,::1"
 
 cd /home/github/video_info
 
+# ---- 注入 YT_PO_TOKEN（可选）----
+# 优先使用已有环境变量；若无，则从 config.json 读取并导出
+if [ -z "${YT_PO_TOKEN:-}" ] && [ -f config.json ]; then
+  TOK=$(python3 - <<'PY'
+import json
+try:
+    with open('config.json','r',encoding='utf-8') as f:
+        d=json.load(f)
+    t=d.get('YT_PO_TOKEN')
+    if t:
+        print(t)
+except Exception:
+    pass
+PY
+  )
+  if [ -n "$TOK" ]; then
+    export YT_PO_TOKEN="$TOK"
+    echo "🔑 已从 config.json 注入 YT_PO_TOKEN" >> /home/github/video_info/cron_get_transcripts.log
+  else
+    echo "ℹ️ 未在 config.json 中发现 YT_PO_TOKEN（可选）。" >> /home/github/video_info/cron_get_transcripts.log
+  fi
+fi
+
 CHANNEL_URL="https://www.youtube.com/@sunriches/videos"
 OUTPUT_DIR="2.sunrich"
 SAVE_DIR="mk_video"
