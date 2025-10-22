@@ -37,7 +37,6 @@ import json
 import requests
 import subprocess
 import shutil
-import shlex
 from youtube_transcript_api import YouTubeTranscriptApi
 
 # ---- 代理兜底设置 ----
@@ -74,34 +73,6 @@ def build_youtube_extractor_args(client: str = 'tv') -> str:
         return f"youtube:player-client={client},po_token={token}"
     return f"youtube:player-client={client}"
 
-def run_cmd_live(cmd, env=None, prefix="    | "):
-    """实时打印子进程输出，并返回完整输出。
-    出错时抛出 CalledProcessError，stderr/output 含完整日志，便于后续判断。"""
-    print(f"    -> 执行命令: {' '.join(shlex.quote(c) for c in cmd)}")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=env,
-        bufsize=1,
-        universal_newlines=True,
-    )
-    lines = []
-    try:
-        while True:
-            line = proc.stdout.readline()
-            if not line and proc.poll() is not None:
-                break
-            if line:
-                print(prefix + line.rstrip())
-                lines.append(line)
-    finally:
-        rc = proc.wait()
-    full = "".join(lines)
-    if rc != 0:
-        raise subprocess.CalledProcessError(rc, cmd, output=full, stderr=full)
-    return full
 
 def check_dependencies():
     """检查脚本所需的外部命令行工具是否存在。"""
@@ -299,7 +270,7 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             return None
 
         ck = _choose_youtube_cookies()
-        print(f"    -> 使用 cookies: {ck if ck else '无'}")
+        #print(f"    -> 使用 cookies: {ck if ck else '无'}")
 
         auto_cmd = [
             'yt-dlp',
@@ -313,13 +284,13 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         if ck:
             auto_cmd[1:1] = ['--cookies', ck]
 
-        print("    -> 下载模式: 自适应 (HLS/DASH) + 抽音 为 mp3")
-        print(f"    -> 输出文件: {audio_path}")
+        #print("    -> 下载模式: 自适应 (HLS/DASH) + 抽音 为 mp3")
+        #print(f"    -> 输出文件: {audio_path}")
         try:
-            run_cmd_live(auto_cmd)
+            subprocess.run(auto_cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError:
             # 1.2 若自适应失败，回退至 TV 客户端（可附带 PO Token），仅取音频轨
-            print("    -> 自适应模式失败，回退至 TV 客户端仅音频轨…")
+            #print("    -> 自适应模式失败，回退至 TV 客户端仅音频轨…")
             extractor_args = build_youtube_extractor_args('tv')
             tv_cmd = [
                 'yt-dlp',
@@ -332,9 +303,9 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             ]
             if ck:
                 tv_cmd[1:1] = ['--cookies', ck]
-            print(f"    -> 回退 extractor-args: {extractor_args}")
-            print(f"    -> 输出文件: {audio_path}")
-            run_cmd_live(tv_cmd)
+            #print(f"    -> 回退 extractor-args: {extractor_args}")
+            #print(f"    -> 输出文件: {audio_path}")
+            subprocess.run(tv_cmd, check=True, capture_output=True, text=True)
 
         # 2. 根据选择加载模型并转录
         transcript_text = ""
