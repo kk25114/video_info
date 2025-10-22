@@ -87,6 +87,22 @@ def check_dependencies():
         print("请根据您的操作系统进行安装。例如在 Ubuntu/Debian 上: sudo apt update && sudo apt install ffmpeg")
         exit(1)
 
+def _normalize_single_video_url(u: str) -> str | None:
+    """若传入的是单个视频（watch 链接 / youtu.be / 11位ID），归一化为 watch 链接。否则返回 None。"""
+    u = u.strip()
+    # youtu.be 短链
+    m = re.search(r"https?://(?:www\.)?youtu\.be/([A-Za-z0-9_-]{11})", u)
+    if m:
+        return f"https://www.youtube.com/watch?v={m.group(1)}"
+    # watch 链接
+    if re.search(r"https?://(?:www\.)?youtube\.com/watch\?", u):
+        return u
+    # 仅给了 11 位视频ID
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", u):
+        return f"https://www.youtube.com/watch?v={u}"
+    return None
+
+
 def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int = 20):
     """使用 yt-dlp 从给定的 YouTube 频道/播放列表/视频链接获取视频 URL 列表。
 
@@ -108,6 +124,11 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
     if not use_fast_mode:
         print(f"正在从目标链接获取所有视频 URL: {youtube_url}（首次运行，耗时~47秒）")
     
+    # 若输入本身就是“单个视频”，直接返回该视频链接，避免 --get-url 产生 googlevideo 直链
+    single = _normalize_single_video_url(youtube_url)
+    if single:
+        return [single]
+
     try:
         # 构造 yt-dlp 命令（列表阶段不强制客户端，避免无谓的 403）
         command = [
@@ -152,9 +173,15 @@ def sanitize_filename(title):
 
 
 def get_video_id(url):
-    """从 URL 中提取 YouTube 视频 ID。"""
-    if 'v=' in url:
-        return url.split('v=')[1].split('&')[0]
+    """从 URL 中提取 YouTube 视频 ID。仅匹配标准位置，避免误命中如 mv=m、vprv=1。"""
+    # 优先匹配 watch?v=ID
+    m = re.search(r"[?&]v=([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
+    # youtu.be/ID
+    m = re.search(r"https?://(?:www\.)?youtu\.be/([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
     return None
 
 def format_transcript_text(text, asr_provider='whisper'):
@@ -264,29 +291,24 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             return fixed if os.path.isfile(fixed) else None
 
         ck = _choose_youtube_cookies()
-        #print(f"    -> 使用 cookies: {ck if ck else '无'}")
 
-        auto_cmd = [
-            'yt-dlp',
-            '-f', 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best',
-            '--hls-prefer-native', '--concurrent-fragments', '16',
-            '--no-playlist',
-            '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
-            '--output', audio_path,
-            video_url
-        ]
-        if ck:
-            auto_cmd[1:1] = ['--cookies', ck]
+        def build_auto_cmd(with_cookies: bool):
+            cmd = [
+                'yt-dlp',
+                '-f', 'best/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio',
+                '--hls-prefer-native', '--concurrent-fragments', '16',
+                '--no-playlist',
+                '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
+                '--output', audio_path,
+                video_url
+            ]
+            if with_cookies and ck:
+                cmd[1:1] = ['--cookies', ck]
+            return cmd
 
-        #print("    -> 下载模式: 自适应 (HLS/DASH) + 抽音 为 mp3")
-        #print(f"    -> 输出文件: {audio_path}")
-        try:
-            subprocess.run(auto_cmd, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError:
-            # 1.2 若自适应失败，回退至 TV 客户端（可附带 PO Token），仅取音频轨
-            #print("    -> 自适应模式失败，回退至 TV 客户端仅音频轨…")
+        def build_tv_cmd(with_cookies: bool):
             extractor_args = build_youtube_extractor_args('tv')
-            tv_cmd = [
+            cmd = [
                 'yt-dlp',
                 '--extractor-args', extractor_args,
                 '-f', 'ba/b',
@@ -295,11 +317,35 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 '--output', audio_path,
                 video_url
             ]
-            if ck:
-                tv_cmd[1:1] = ['--cookies', ck]
-            #print(f"    -> 回退 extractor-args: {extractor_args}")
-            #print(f"    -> 输出文件: {audio_path}")
-            subprocess.run(tv_cmd, check=True, capture_output=True, text=True)
+            if with_cookies and ck:
+                cmd[1:1] = ['--cookies', ck]
+            return cmd
+
+        strategies = [
+            ("自适应(带cookies)", build_auto_cmd(True)),
+            ("自适应(不带cookies)", build_auto_cmd(False)),
+            ("TV直链(带cookies)", build_tv_cmd(True)),
+            ("TV直链(不带cookies)", build_tv_cmd(False)),
+        ]
+
+        last_err = None
+        for desc, cmd in strategies:
+            try:
+                print(f"    -> 尝试下载策略: {desc}")
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
+                print(f"    -> 下载成功: {desc}")
+                break
+            except subprocess.CalledProcessError as e_try:
+                last_err = e_try
+                # 简要分类错误，继续尝试下一策略
+                err_text = (e_try.stderr or "").lower()
+                if '403' in err_text or 'forbidden' in err_text:
+                    print(f"    -> 下载失败(403): {desc}")
+                else:
+                    print(f"    -> 下载失败: {desc}: {e_try.stderr.strip() if e_try.stderr else e_try}")
+        else:
+            # 所有策略均失败
+            raise last_err if last_err else subprocess.CalledProcessError(1, strategies[-1][1], stderr='all strategies failed')
 
         # 2. 根据选择加载模型并转录
         transcript_text = ""
