@@ -49,6 +49,30 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 # 全局变量，用于懒加载 ASR 模型，避免重复加载
 asr_model = None
 
+def get_youtube_po_token():
+    """从环境变量或 config.json 读取 YouTube GVS PO Token。优先环境变量。"""
+    token = os.environ.get('YT_PO_TOKEN')
+    if token:
+        return token
+    cfg = 'config.json'
+    if os.path.exists(cfg):
+        try:
+            with open(cfg, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                t = data.get('YT_PO_TOKEN')
+                if t:
+                    return t
+        except Exception:
+            pass
+    return None
+
+def build_youtube_extractor_args(client: str = 'tv') -> str:
+    """构造 yt-dlp 的 --extractor-args 字符串，自动拼接 po_token（如存在）。"""
+    token = get_youtube_po_token()
+    if token:
+        return f"youtube:player-client={client},po_token={token}"
+    return f"youtube:player-client={client}"
+
 def check_dependencies():
     """检查脚本所需的外部命令行工具是否存在。"""
     if not shutil.which('yt-dlp'):
@@ -88,7 +112,7 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
         command = [
             'yt-dlp',
             '--cookies', 'cookie.txt',
-            '--extractor-args', 'youtube:player-client=tv',
+            '--extractor-args', build_youtube_extractor_args('tv'),
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--flat-playlist'
         ]
@@ -233,15 +257,10 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
-        po_token = os.environ.get('YT_PO_TOKEN')
-        extractor_arg_value = (
-            f"youtube:player-client=tv,po_token={po_token}" if po_token else
-            "youtube:player-client=tv"
-        )
         download_command = [
             'yt-dlp',
             '--cookies', 'cookie.txt',
-            '--extractor-args', extractor_arg_value,
+            '--extractor-args', build_youtube_extractor_args('tv'),
             '-f', 'ba/b',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '-x', '--audio-format', 'mp3', 
@@ -362,7 +381,7 @@ def get_video_title(video_url):
         command = [
             'yt-dlp',
             '--cookies', 'cookie.txt',
-            '--extractor-args', 'youtube:player-client=tv',
+            '--extractor-args', build_youtube_extractor_args('tv'),
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--print', 'title', '--no-playlist', video_url
         ]
@@ -380,7 +399,7 @@ def get_video_upload_date(video_url):
         command = [
             'yt-dlp',
             '--cookies', 'cookie.txt',
-            '--extractor-args', 'youtube:player-client=tv',
+            '--extractor-args', build_youtube_extractor_args('tv'),
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--print', '%(upload_date)s', '--no-playlist', video_url
         ]
