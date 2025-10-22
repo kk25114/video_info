@@ -112,7 +112,7 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
         # 构造 yt-dlp 命令（列表阶段不强制客户端，避免无谓的 403）
         command = [
             'yt-dlp',
-            '--cookies', '/home/github/video_info/cookie.txt',
+            '--cookies', 'cookies.txt',
             '--flat-playlist'
         ]
         
@@ -259,12 +259,13 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
 
         # 1.1 自适应模式（不强制客户端），参考 spacedownload/m4a_download.py
         def _choose_youtube_cookies():
-            # 固定优先使用 /home/github/video_info/cookie.txt
-            fixed = '/home/github/video_info/cookie.txt'
-            if os.path.isfile(fixed):
-                return fixed
-            # 兜底：当前工作目录下常见命名
-            for p in (os.path.join(os.getcwd(), 'cookie.txt'), os.path.join(os.getcwd(), 'cookies.txt')):
+            # 使用之前的策略：优先 spacedownload 的 YouTube cookies，其次当前目录常见命名
+            candidates = [
+                '/home/github/spacedownload/cookies_youtube.txt',
+                os.path.join(os.getcwd(), 'cookie.txt'),
+                os.path.join(os.getcwd(), 'cookies.txt'),
+            ]
+            for p in candidates:
                 if os.path.isfile(p):
                     return p
             return None
@@ -417,7 +418,7 @@ def get_video_title(video_url):
     try:
         command = [
             'yt-dlp',
-            '--cookies', '/home/github/video_info/cookie.txt',
+            '--cookies', 'cookies.txt',
             '--print', 'title', '--no-playlist', video_url
         ]
         result = subprocess.run(
