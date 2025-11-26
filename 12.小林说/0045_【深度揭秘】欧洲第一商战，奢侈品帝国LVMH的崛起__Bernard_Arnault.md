@@ -1,6 +1,6 @@
 # 【深度揭秘】欧洲第一商战，奢侈品帝国LVMH的崛起 | Bernard Arnault
 
-**原始链接:** <https://www.youtube.com/watch?v=fKRwpnMb75c>
+**原始链接:** （已隐藏）
 
 ---
 

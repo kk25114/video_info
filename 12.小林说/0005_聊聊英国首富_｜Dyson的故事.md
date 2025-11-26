@@ -1,6 +1,6 @@
 # 聊聊英国首富 ｜Dyson的故事
 
-**原始链接:** <https://www.youtube.com/watch?v=qCn3WRG36Sc>
+**原始链接:** （已隐藏）
 
 ---
 

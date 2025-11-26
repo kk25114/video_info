@@ -1,6 +1,6 @@
 # 【投资思想精华】做空整个美国的交易之王——Jesse Livermore  杰西·利弗莫尔
 
-**原始链接:** <https://www.youtube.com/watch?v=8cph2_Xvfbo>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # 马斯克收购Twitter完整解读 | 毒丸计划, 恶意收购, Poison Pill, Tender Offer
 
-**原始链接:** <https://www.youtube.com/watch?v=jXF-oeuRdlw>
+**原始链接:** （已隐藏）
 
 ---
 

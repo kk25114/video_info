@@ -1,6 +1,6 @@
 # 【特别篇】真实版华尔街之狼 - 一马基金 1MDB Scandal
 
-**原始链接:** <https://www.youtube.com/watch?v=i0hac3c_xhs>
+**原始链接:** （已隐藏）
 
 ---
 

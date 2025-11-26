@@ -1,6 +1,6 @@
 # 最神奇的公司 & 最超级英雄的天才 | Tesla特斯拉 & Elon Musk马斯克
 
-**原始链接:** <https://www.youtube.com/watch?v=C5gJHwR6JT0>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # 一滴血的骗局 - 世界最美女骗子 - Elizabeth Holmes
 
-**原始链接:** <https://www.youtube.com/watch?v=yIrTG6UtqO8>
+**原始链接:** （已隐藏）
 
 ---
 

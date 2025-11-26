@@ -1,6 +1,6 @@
 # 这个著名试验，试图再现生命创生的伟大时刻。寻秘自然01： 生命起源（上） Recreate the magic moment when life formed in the lab.
 
-**原始链接:** <https://www.youtube.com/watch?v=GPYn1vJh1Q0>
+**原始链接:** （已隐藏）
 
 ﻿生命
 

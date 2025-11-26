@@ -1,6 +1,6 @@
 # 史上亏钱最快的男人 - 2天巨亏200亿 - Bill Hwang (Archegos)
 
-**原始链接:** <https://www.youtube.com/watch?v=8CI82PPsksU>
+**原始链接:** （已隐藏）
 
 ---
 

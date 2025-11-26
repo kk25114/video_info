@@ -1,6 +1,6 @@
 # Elon Musk的神奇股权激励
 
-**原始链接:** <https://www.youtube.com/watch?v=shDL1NNHCqw>
+**原始链接:** （已隐藏）
 
 ---
 

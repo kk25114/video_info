@@ -1,6 +1,6 @@
 # 百年奇才自杀式创业，天才 or 疯子——Howard Hughes 霍华德·休斯
 
-**原始链接:** <https://www.youtube.com/watch?v=yFuovwmWMz4>
+**原始链接:** （已隐藏）
 
 ---
 

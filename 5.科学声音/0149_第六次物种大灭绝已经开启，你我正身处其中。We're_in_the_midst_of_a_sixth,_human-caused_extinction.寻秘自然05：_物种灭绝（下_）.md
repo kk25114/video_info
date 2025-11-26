@@ -1,6 +1,6 @@
 # 第六次物种大灭绝已经开启，你我正身处其中。We're in the midst of a sixth, human-caused extinction.寻秘自然05： 物种灭绝（下 ）
 
-**原始链接:** <https://www.youtube.com/watch?v=MiNtiO1OMSM>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

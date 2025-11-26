@@ -1,6 +1,6 @@
 # 当真相无比残酷，我们还应该相信吗？如何进行自我PUA？
 
-**原始链接:** <https://www.youtube.com/watch?v=XXK5wOWh7vM>
+**原始链接:** （已隐藏）
 
 ---
 

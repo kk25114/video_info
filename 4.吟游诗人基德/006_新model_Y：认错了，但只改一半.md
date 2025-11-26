@@ -1,6 +1,6 @@
 # 新model Y：认错了，但只改一半
 
-**原始链接:** <https://www.youtube.com/watch?v=tXi9u803LsE>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

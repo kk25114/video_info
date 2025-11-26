@@ -1,6 +1,6 @@
 # 你是如何被大数据+心理学操控的？｜Facebook丑闻
 
-**原始链接:** <https://www.youtube.com/watch?v=U5gfGxS-8Pw>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # 键盘排布为什么是“QWERTY”？整整百年无人改进？
 
-**原始链接:** <https://www.youtube.com/watch?v=yN-X4LvkQDo>
+**原始链接:** （已隐藏）
 
 ---
 

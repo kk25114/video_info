@@ -1,6 +1,6 @@
 # 关于我，和我的经历 Facts About Me | 谢谢大家给我的100K！2020杀青
 
-**原始链接:** <https://www.youtube.com/watch?v=pJyMf5NCyV8>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

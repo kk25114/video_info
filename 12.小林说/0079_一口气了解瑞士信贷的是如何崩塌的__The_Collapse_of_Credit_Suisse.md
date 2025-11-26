@@ -1,6 +1,6 @@
 # 一口气了解瑞士信贷的是如何崩塌的 | The Collapse of Credit Suisse
 
-**原始链接:** <https://www.youtube.com/watch?v=WHxOQERmjj8>
+**原始链接:** （已隐藏）
 
 ---
 

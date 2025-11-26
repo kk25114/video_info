@@ -1,6 +1,6 @@
 # 关于元宇宙，你需要知道的那些事儿~ ｜NFT Metaverse
 
-**原始链接:** <https://www.youtube.com/watch?v=pFRXGxwat_U>
+**原始链接:** （已隐藏）
 
 ---
 

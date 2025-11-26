@@ -1,6 +1,6 @@
 # 华尔街投行JPMorgan工作是一种什么样的体验 ｜200K粉丝回馈
 
-**原始链接:** <https://www.youtube.com/watch?v=4HOwZXAVkZg>
+**原始链接:** （已隐藏）
 
 ---
 

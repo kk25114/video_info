@@ -1,6 +1,6 @@
 # 一个公司到底谁说了算？ | OpenAI背后权力的游戏
 
-**原始链接:** <https://www.youtube.com/watch?v=2MJt1dTqbPk>
+**原始链接:** （已隐藏）
 
 ---
 

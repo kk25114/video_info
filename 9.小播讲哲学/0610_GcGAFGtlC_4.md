@@ -1,6 +1,6 @@
 # 视频ID: GcGAFGtlC_4
 
-**原始链接:** <https://www.youtube.com/watch?v=GcGAFGtlC_4>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # 史上最大庞氏骗局，瞒天过海二十年 - 麦道夫 Bernie Madoff
 
-**原始链接:** <https://www.youtube.com/watch?v=Prq7YLauL84>
+**原始链接:** （已隐藏）
 
 ---
 

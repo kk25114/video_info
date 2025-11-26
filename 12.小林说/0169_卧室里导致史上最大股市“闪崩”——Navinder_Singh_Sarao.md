@@ -1,6 +1,6 @@
 # 卧室里导致史上最大股市“闪崩”——Navinder Singh Sarao
 
-**原始链接:** <https://www.youtube.com/watch?v=za6-ykbukug>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # 英国经济和英国脱欧的那些事儿 | Brexit
 
-**原始链接:** <https://www.youtube.com/watch?v=SdV-U1ttWYM>
+**原始链接:** （已隐藏）
 
 ---
 

@@ -1,6 +1,6 @@
 # DeepSeek终极报告：误解与真相
 
-**原始链接:** <https://www.youtube.com/watch?v=QzntyTIUHQU>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

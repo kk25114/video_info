@@ -1,6 +1,6 @@
 # 新能源汽车惊天骗局｜风口上的电动汽猪 Nikola
 
-**原始链接:** <https://www.youtube.com/watch?v=EKS6mfLtR2s>
+**原始链接:** （已隐藏）
 
 ---
 

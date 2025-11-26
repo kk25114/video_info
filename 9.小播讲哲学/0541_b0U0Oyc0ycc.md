@@ -1,6 +1,6 @@
 # ID: b0U0Oyc0ycc
 
-**原始链接:** <https://www.youtube.com/watch?v=b0U0Oyc0ycc>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

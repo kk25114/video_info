@@ -1,6 +1,6 @@
 # 百年战役先驱伍连德-WUL IEN-TEH，他结束了一场人间浩劫
 
-**原始链接:** <https://www.youtube.com/watch?v=nkv4jria180>
+**原始链接:** （已隐藏）
 
 大家好
 

@@ -1,6 +1,6 @@
 # GDP是会骗人的 | 一口气了解GDP
 
-**原始链接:** <https://www.youtube.com/watch?v=P-NmMX9rlYQ>
+**原始链接:** （已隐藏）
 
 ---
 

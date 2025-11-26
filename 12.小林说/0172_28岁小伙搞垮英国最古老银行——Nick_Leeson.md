@@ -1,6 +1,6 @@
 # 28岁小伙搞垮英国最古老银行——Nick Leeson
 
-**原始链接:** <https://www.youtube.com/watch?v=XaBxlOnzYvg>
+**原始链接:** （已隐藏）
 
 ---
 

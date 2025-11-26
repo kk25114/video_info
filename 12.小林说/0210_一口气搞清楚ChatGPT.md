@@ -1,6 +1,6 @@
 # 一口气搞清楚ChatGPT
 
-**原始链接:** <https://www.youtube.com/watch?v=zNRvAMJOfAI>
+**原始链接:** （已隐藏）
 
 ---
 

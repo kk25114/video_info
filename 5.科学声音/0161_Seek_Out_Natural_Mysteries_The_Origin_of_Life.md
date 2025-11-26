@@ -1,6 +1,6 @@
 # Seek Out Natural Mysteries: The Origin of Life
 
-**原始链接:** <https://www.youtube.com/watch?v=8pxdSCng-hc>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

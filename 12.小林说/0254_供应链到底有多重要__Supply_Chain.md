@@ -1,6 +1,6 @@
 # 供应链到底有多重要? | Supply Chain
 
-**原始链接:** <https://www.youtube.com/watch?v=5nTPBvQZm-s>
+**原始链接:** （已隐藏）
 
 ---
 

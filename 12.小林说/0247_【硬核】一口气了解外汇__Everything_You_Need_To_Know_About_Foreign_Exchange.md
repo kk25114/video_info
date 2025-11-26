@@ -1,6 +1,6 @@
 # 【硬核】一口气了解外汇 | Everything You Need To Know About Foreign Exchange
 
-**原始链接:** <https://www.youtube.com/watch?v=NM1hSguZ4fI>
+**原始链接:** （已隐藏）
 
 ---
 

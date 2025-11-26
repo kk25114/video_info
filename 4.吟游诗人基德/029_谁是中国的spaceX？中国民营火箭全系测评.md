@@ -1,6 +1,6 @@
 # 谁是中国的spaceX？中国民营火箭全系测评
 
-**原始链接:** <https://www.youtube.com/watch?v=8P5MOSM8jMg>
+**原始链接:** （已隐藏）
 
 > **注意**: 本文稿由 `funasr` 语音识别生成，可能存在错误。
 

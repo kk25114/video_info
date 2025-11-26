@@ -723,7 +723,7 @@ def main(args):
             transcript_file_path = os.path.join(args.output_dir, filename)
             
             markdown_content = f"# {display_title}\n\n"
-            markdown_content += f"**原始链接:** <{link}>\n\n"
+            markdown_content += "**原始链接:** （已隐藏）\n\n"
 
             # 6. 如果需要，使用 AI 生成简介和话题，并插入
             if args.summarize:

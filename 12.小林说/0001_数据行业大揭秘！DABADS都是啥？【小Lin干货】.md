@@ -1,6 +1,6 @@
 # 数据行业大揭秘！DA/BA/DS都是啥？【小Lin干货】
 
-**原始链接:** <https://www.youtube.com/watch?v=C366hnsI8UI>
+**原始链接:** （已隐藏）
 
 ---
 
