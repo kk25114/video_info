@@ -53,7 +53,9 @@ DEFAULT_CONFIG = {
     "saveDir": "./tts_output",
     "retryCount": 0,
     "retryInterval": 5,
-    "chunkLimit": 4500
+    "chunkLimit": 4500,
+    "proxy": "",
+    "bypassMicrosoftProxy": True
 }
 
 if not os.path.isfile(CONFIG_PATH):
@@ -76,8 +78,39 @@ SAVE_DIR        = os.path.abspath(cfg["saveDir"])
 RETRY_COUNT     = cfg["retryCount"]
 RETRY_INTERVAL  = cfg["retryInterval"]
 CHUNK_LIMIT     = cfg["chunkLimit"]
+PROXY           = cfg["proxy"]
+BYPASS_MS_PROXY = cfg["bypassMicrosoftProxy"]
 
 os.makedirs(SAVE_DIR, exist_ok=True)
+
+
+def merge_no_proxy(hosts):
+    """为 NO_PROXY / no_proxy 追加域名，确保 Azure 请求走直连"""
+    raw = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+    exist = [h for h in raw.split(",") if h]
+    for h in hosts:
+        if h not in exist:
+            exist.append(h)
+    if exist:
+        joined = ",".join(exist)
+        os.environ["NO_PROXY"] = joined
+        os.environ["no_proxy"] = joined
+
+
+def setup_proxy():
+    keys = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ftp_proxy", "FTP_PROXY")
+    if BYPASS_MS_PROXY:
+        # 直接绕过代理，避免 WebSocket 首包被代理拦截
+        for key in keys:
+            os.environ.pop(key, None)
+    elif PROXY:
+        for key in keys:
+            os.environ.setdefault(key, PROXY)
+    if BYPASS_MS_PROXY:
+        merge_no_proxy([".microsoft.com", ".azure.com"])
+
+
+setup_proxy()
 
 # ========= 2. 工具函数 =========
 
