@@ -94,7 +94,7 @@ nano config.json
   "speechKey": "你的Azure密钥",
   "serviceRegion": "eastasia",
   "voiceName": "zh-CN-YunyangNeural",
-  "saveDir": "/mnt/d/Program Files/下载"
+  "saveDir": ""
 }
 
 # 合成语音
@@ -170,7 +170,7 @@ python3 get_transcripts.py --help
   "azure_speech_key": "your-key-here",
   "azure_service_region": "eastasia",
   "default_voice": "zh-CN-YunyangNeural",
-  "output_dir": "/mnt/d/Program Files/下载",
+  "output_dir": "",
   "video_quality": "720p",
   "auto_commit": true
 }
