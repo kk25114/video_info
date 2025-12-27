@@ -51,6 +51,8 @@ mk_video/**/*.wav
 mk_video/images/*
 mk_video/videos/*
 **/temp_audio_*.mp3
+**/temp_audio_*
+**/*.ytdl
 
 # 忽略所有音视频（仅本地保留，不上传）
 *.mp4
@@ -78,4 +80,4 @@ Thumbs.db
 scripts
 
 
-
+douyin_playwright
