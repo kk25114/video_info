@@ -54,6 +54,12 @@ DEFAULT_CONFIG = {
     "retryCount": 0,
     "retryInterval": 5,
     "chunkLimit": 4500,
+    "rtfTimeoutThreshold": 3.0,
+    "frameTimeoutIntervalMs": 6000,
+    "enableCompressedAudioTransmission": True,
+    "proactiveSplitLimit": 1200,
+    "autoSplitOnTimeout": True,
+    "timeoutSplitLimit": 1200,
     "proxy": "",
     "bypassMicrosoftProxy": True
 }
@@ -78,6 +84,12 @@ SAVE_DIR        = os.path.abspath(cfg["saveDir"])
 RETRY_COUNT     = cfg["retryCount"]
 RETRY_INTERVAL  = cfg["retryInterval"]
 CHUNK_LIMIT     = cfg["chunkLimit"]
+RTF_TIMEOUT_THRESHOLD = float(cfg["rtfTimeoutThreshold"])
+FRAME_TIMEOUT_INTERVAL_MS = int(cfg["frameTimeoutIntervalMs"])
+ENABLE_COMPRESSED_AUDIO_TRANSMISSION = bool(cfg["enableCompressedAudioTransmission"])
+PROACTIVE_SPLIT_LIMIT = int(cfg["proactiveSplitLimit"])
+AUTO_SPLIT_ON_TIMEOUT = bool(cfg["autoSplitOnTimeout"])
+TIMEOUT_SPLIT_LIMIT = int(cfg["timeoutSplitLimit"])
 PROXY           = cfg["proxy"]
 BYPASS_MS_PROXY = cfg["bypassMicrosoftProxy"]
 
@@ -276,17 +288,45 @@ def generate_srt(word_boundaries: List[tuple], srt_path: str):
 
 
 def split_text(text: str, limit: int = CHUNK_LIMIT):
-    """按中文标点/换行切分，确保每段 <= limit 字符"""
-    pieces, buf = [], ''
-    for seg in re.split(r'(?<=[。？！；…\n])', text):
-        if len(buf) + len(seg) > limit:
+    """按中文标点/换行切分，确保每段 <= limit 字符；无标点时会硬切。"""
+    if limit <= 0:
+        return [text] if text else []
+
+    pieces: List[str] = []
+    buf = ""
+
+    def flush_buffer():
+        nonlocal buf
+        if buf:
             pieces.append(buf)
-            buf = seg
-        else:
-            buf += seg
-    if buf:
-        pieces.append(buf)
-    return pieces
+            buf = ""
+
+    def hard_split(seg: str):
+        """把单个超长 seg 硬切到 <= limit，并尽量在标点处断开。"""
+        remaining = seg
+        while remaining:
+            if len(remaining) <= limit:
+                yield remaining
+                return
+            window = remaining[:limit]
+            cut = max(window.rfind("。"), window.rfind("！"), window.rfind("？"), window.rfind("；"), window.rfind("…"), window.rfind("，"), window.rfind("\n"))
+            if cut <= 0:
+                cut = limit
+            else:
+                cut = cut + 1
+            yield remaining[:cut]
+            remaining = remaining[cut:]
+
+    for seg in re.split(r"(?<=[。？！；…\n])", text):
+        if not seg:
+            continue
+        for part in hard_split(seg):
+            if len(buf) + len(part) > limit:
+                flush_buffer()
+            buf += part
+
+    flush_buffer()
+    return [p for p in pieces if p]
 
 
 def build_ssml(txt: str) -> str:
@@ -312,22 +352,35 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
     cfg.set_speech_synthesis_output_format(
         speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
     )
-    synthesizer = speechsdk.SpeechSynthesizer(
-        speech_config=cfg,
-        audio_config=speechsdk.audio.AudioConfig(filename=outfile)
+    cfg.set_property(
+        speechsdk.PropertyId.SpeechSynthesis_RtfTimeoutThreshold,
+        str(RTF_TIMEOUT_THRESHOLD),
     )
+    cfg.set_property(
+        speechsdk.PropertyId.SpeechSynthesis_FrameTimeoutInterval,
+        str(FRAME_TIMEOUT_INTERVAL_MS),
+    )
+    if ENABLE_COMPRESSED_AUDIO_TRANSMISSION:
+        cfg.set_property(
+            speechsdk.PropertyId.SpeechServiceConnection_SynthEnableCompressedAudioTransmission,
+            "true",
+        )
 
-    # 连接 synthesis_word_boundary 事件
-    synthesizer.synthesis_word_boundary.connect(lambda e: word_boundaries.append(e))
-    
-    audio_duration = datetime.timedelta(0)
     attempt = 0
     while True:
         try:
+            word_boundaries.clear()
+            if attempt > 0 and os.path.exists(outfile):
+                os.remove(outfile)
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=cfg,
+                audio_config=speechsdk.audio.AudioConfig(filename=outfile),
+            )
+            synthesizer.synthesis_word_boundary.connect(lambda e: word_boundaries.append(e))
+
             result = synthesizer.speak_ssml_async(ssml).get()
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                audio_duration = result.audio_duration
-                return audio_duration
+                return result.audio_duration
             elif result.reason == speechsdk.ResultReason.Canceled:
                 details = speechsdk.SpeechSynthesisCancellationDetails(result)
                 raise RuntimeError(f"Canceled: {details.reason} | {details.error_details}")
@@ -391,32 +444,50 @@ def main():
         print("文本内容为空")
         sys.exit(1)
 
-    segments = split_text(text)
-    print(f"共 {len(segments)} 段，开始合成…")
+    split_limit = CHUNK_LIMIT
+    if PROACTIVE_SPLIT_LIMIT and PROACTIVE_SPLIT_LIMIT > 0:
+        split_limit = min(split_limit, PROACTIVE_SPLIT_LIMIT)
+    segments = split_text(text, limit=split_limit)
+    print(f"共 {len(segments)} 段，开始合成…（splitLimit={split_limit}）")
 
     chunk_files = []
     all_word_boundaries = []
-    total_duration_ticks = 0
+    total_duration_ticks = 0  # int, 100ns ticks
 
-    for idx, seg in enumerate(segments, 1):
-        out = os.path.join(SAVE_DIR, f"chunk_{idx:03}.wav")
-        print(f"  [{idx}/{len(segments)}] 合成中 …")
-        
+    i = 0
+    while i < len(segments):
+        seg = segments[i]
+        chunk_idx = len(chunk_files) + 1
+        out = os.path.join(SAVE_DIR, f"chunk_{chunk_idx:03}.wav")
+        print(f"  [{i+1}/{len(segments)}] 合成中 …")
+
         chunk_boundaries = []
-        chunk_duration = synthesize(build_ssml(seg), out, chunk_boundaries)
-        
+        try:
+            chunk_duration = synthesize(build_ssml(seg), out, chunk_boundaries)
+        except Exception as e:
+            msg = str(e)
+            is_timeout = ("Timeout while synthesizing" in msg) or ("RTF" in msg) or ("frame interval" in msg)
+            if AUTO_SPLIT_ON_TIMEOUT and is_timeout and len(seg) > TIMEOUT_SPLIT_LIMIT:
+                smaller = split_text(seg, limit=TIMEOUT_SPLIT_LIMIT)
+                if len(smaller) > 1:
+                    print(f"[自动切分] 当前段疑似超时，拆成 {len(smaller)} 段后重试（limit={TIMEOUT_SPLIT_LIMIT}）")
+                    segments = segments[:i] + smaller + segments[i+1:]
+                    continue
+            raise
+
         # 为每个词语事件添加时间偏移并保存
         for e in chunk_boundaries:
-            # 创建一个包含偏移时间的元组，统一使用 ticks 单位
+            duration_ticks = int(round(e.duration.total_seconds() * 10_000_000))
             adjusted_event = (
-                e.audio_offset + total_duration_ticks,  # 调整后的开始时间（ticks）
-                e.duration.total_seconds() * 10_000_000,  # 持续时长转换为 ticks
-                e.text  # 文本内容
+                int(e.audio_offset) + total_duration_ticks,
+                duration_ticks,
+                e.text,
             )
             all_word_boundaries.append(adjusted_event)
 
         chunk_files.append(out)
-        total_duration_ticks += chunk_duration.total_seconds() * 10_000_000
+        total_duration_ticks += int(round(chunk_duration.total_seconds() * 10_000_000))
+        i += 1
 
     # 确定输出文件名和路径
     if custom_output:
