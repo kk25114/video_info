@@ -30,14 +30,11 @@ import datetime
 import subprocess
 import json
 import azure.cognitiveservices.speech as speechsdk
-from typing import List
-
-# ---- 代理兜底设置 ----
-PROXY = "http://172.23.240.1:10806"
-for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
-    os.environ.setdefault(key, PROXY)
-os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
-
+import socket
+import ssl
+import base64
+from urllib.parse import urlparse, unquote
+from typing import List, Optional, Tuple
 
 # ========= 1. 读取配置 =========
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -95,6 +92,65 @@ BYPASS_MS_PROXY = cfg["bypassMicrosoftProxy"]
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+MS_NO_PROXY_HOSTS = [
+    ".microsoft.com",
+    ".azure.com",
+    ".speech.microsoft.com",
+    ".tts.speech.microsoft.com",
+]
+NO_PROXY_BASE = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+EFFECTIVE_BYPASS_MS_PROXY = BYPASS_MS_PROXY
+
+
+def _set_no_proxy(value: str):
+    os.environ["NO_PROXY"] = value
+    os.environ["no_proxy"] = value
+
+
+def _build_no_proxy(base: str, hosts: list) -> str:
+    items = [h.strip() for h in base.split(",") if h.strip()]
+    for h in hosts:
+        if h not in items:
+            items.append(h)
+    return ",".join(items)
+
+
+def _apply_ms_bypass(enable: bool):
+    """
+    enable=True: 让 *.microsoft.com / *.speech.microsoft.com 等域名绕过代理（直连）。
+    enable=False: 恢复到启动时的 NO_PROXY 基线（允许这些域名走代理）。
+    """
+    if enable:
+        _set_no_proxy(_build_no_proxy(NO_PROXY_BASE, MS_NO_PROXY_HOSTS))
+    else:
+        _set_no_proxy(NO_PROXY_BASE)
+
+
+def _has_proxy_env() -> bool:
+    return any(
+        os.environ.get(k)
+        for k in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")
+    )
+
+
+def _tls_probe(host: str, port: int = 443, timeout_s: float = 3.5) -> Tuple[bool, str]:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s) as raw:
+            raw.settimeout(timeout_s)
+            ctx = ssl.create_default_context()
+            with ctx.wrap_socket(raw, server_hostname=host) as s:
+                s.settimeout(timeout_s)
+                s.do_handshake()
+        return True, "tls ok"
+    except OSError as e:
+        return False, f"tls failed: {e.__class__.__name__}: {e}"
+    except ssl.SSLError as e:
+        return False, f"tls failed: SSLError: {e}"
+
+
+def _tts_host(region: str) -> str:
+    return f"{region}.tts.speech.microsoft.com"
+
 
 def merge_no_proxy(hosts):
     """为 NO_PROXY / no_proxy 追加域名，确保 Azure 请求走直连"""
@@ -111,18 +167,190 @@ def merge_no_proxy(hosts):
 
 def setup_proxy():
     keys = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ftp_proxy", "FTP_PROXY")
-    if BYPASS_MS_PROXY:
-        # 直接绕过代理，避免 WebSocket 首包被代理拦截
-        for key in keys:
-            os.environ.pop(key, None)
-    elif PROXY:
+    if PROXY:
         for key in keys:
             os.environ.setdefault(key, PROXY)
-    if BYPASS_MS_PROXY:
-        merge_no_proxy([".microsoft.com", ".azure.com"])
 
 
 setup_proxy()
+
+
+def _normalize_proxy_url(raw: str) -> str:
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        return f"http://{raw}"
+    return raw
+
+
+def _effective_proxy_url() -> str:
+    if PROXY:
+        return PROXY
+    return (
+        os.environ.get("HTTPS_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("http_proxy")
+        or ""
+    )
+
+
+def _redact_proxy_url(proxy_url: str) -> str:
+    proxy_url = _normalize_proxy_url(proxy_url)
+    if not proxy_url:
+        return ""
+    u = urlparse(proxy_url)
+    if not (u.username or u.password):
+        return proxy_url
+    host = u.hostname or ""
+    port = f":{u.port}" if u.port else ""
+    return f"{u.scheme}://***:***@{host}{port}"
+
+
+def _proxy_connect_then_tls_probe(
+    proxy_url: str,
+    target_host: str,
+    target_port: int = 443,
+    timeout_s: float = 4.0,
+) -> Tuple[Optional[bool], str]:
+    """
+    返回 (ok/failed/unknown, detail)：
+    - ok=True：通过代理 CONNECT + TLS 握手成功
+    - ok=False：探测失败（代理不可用/被拒绝/握手失败）
+    - ok=None：代理 scheme 不支持探测（例如 socks5），仅表示“有代理但未验证”
+    """
+    proxy_url = _normalize_proxy_url(proxy_url)
+    if not proxy_url:
+        return False, "no proxy configured"
+
+    u = urlparse(proxy_url)
+    scheme = (u.scheme or "").lower()
+    if scheme not in ("http", "https", "socks5", "socks5h", "socks4", "socks4a"):
+        return None, f"unknown proxy scheme: {scheme or 'missing'}"
+    if scheme.startswith("socks"):
+        return None, f"proxy scheme {scheme} not probed"
+
+    proxy_host = u.hostname
+    if not proxy_host:
+        return False, "proxy host missing"
+    proxy_port = u.port or (443 if scheme == "https" else 80)
+
+    auth_header = ""
+    if u.username or u.password:
+        user = unquote(u.username or "")
+        pwd = unquote(u.password or "")
+        token = base64.b64encode(f"{user}:{pwd}".encode("utf-8")).decode("ascii")
+        auth_header = f"Proxy-Authorization: Basic {token}\r\n"
+
+    try:
+        raw = socket.create_connection((proxy_host, proxy_port), timeout=timeout_s)
+        try:
+            raw.settimeout(timeout_s)
+            if scheme == "https":
+                ctxp = ssl.create_default_context()
+                raw = ctxp.wrap_socket(raw, server_hostname=proxy_host)
+                raw.settimeout(timeout_s)
+
+            req = (
+                f"CONNECT {target_host}:{target_port} HTTP/1.1\r\n"
+                f"Host: {target_host}:{target_port}\r\n"
+                f"{auth_header}"
+                "Proxy-Connection: keep-alive\r\n"
+                "Connection: keep-alive\r\n"
+                "\r\n"
+            )
+            raw.sendall(req.encode("ascii", errors="strict"))
+            resp = raw.recv(4096).decode("iso-8859-1", errors="replace")
+            status_line = resp.split("\r\n", 1)[0].strip()
+            if not status_line.startswith("HTTP/"):
+                return False, f"bad proxy response: {status_line or 'empty'}"
+            if " 200 " not in status_line:
+                return False, f"proxy connect failed: {status_line}"
+
+            ctx = ssl.create_default_context()
+            with ctx.wrap_socket(raw, server_hostname=target_host) as s:
+                s.settimeout(timeout_s)
+                s.do_handshake()
+            return True, f"connect ok: {status_line}"
+        finally:
+            try:
+                raw.close()
+            except Exception:
+                pass
+    except OSError as e:
+        return False, f"proxy probe failed: {e.__class__.__name__}: {e}"
+    except ssl.SSLError as e:
+        return False, f"proxy probe failed: SSLError: {e}"
+
+
+def _init_network_mode() -> Tuple[bool, List[bool]]:
+    """
+    根据直连/代理的连通性探测，决定本次运行的 EFFECTIVE_BYPASS_MS_PROXY，
+    并返回“允许尝试的 bypass 模式列表”（用于失败时切换重试）。
+    """
+    host = _tts_host(SERVICE_REGION)
+    proxy_url = _effective_proxy_url()
+    has_proxy = bool(proxy_url) or _has_proxy_env()
+
+    preferred = bool(BYPASS_MS_PROXY)  # True=微软域名直连；False=微软域名走代理
+    if not has_proxy:
+        _apply_ms_bypass(preferred)
+        return preferred, [preferred]
+
+    direct_ok, direct_detail = _tls_probe(host)
+    proxy_ok: Optional[bool] = None
+    proxy_detail = "no proxy"
+    if has_proxy:
+        proxy_ok, proxy_detail = _proxy_connect_then_tls_probe(proxy_url, host)
+
+    chosen = preferred
+
+    # 仅当“另一种模式更可能可用”时才覆盖配置偏好
+    if has_proxy:
+        if preferred and not direct_ok and (proxy_ok is True or proxy_ok is None):
+            chosen = False
+            print(
+                f"⚠️  直连 {host}:443 不可用（{direct_detail}），本次运行临时关闭 bypassMicrosoftProxy，改走代理。"
+                f"如需固定：在 tts_cli/config.json 设置 bypassMicrosoftProxy=false。"
+            )
+        elif (not preferred) and proxy_ok is False and direct_ok:
+            chosen = True
+            print(
+                f"⚠️  代理不可用（{proxy_detail}），本次运行临时开启 bypassMicrosoftProxy，改为直连微软域名。"
+                f"如需固定：在 tts_cli/config.json 设置 bypassMicrosoftProxy=true。"
+            )
+
+    # 构造“可切换重试”的候选列表：只包含未被探测明确判死刑的模式
+    candidates: List[bool] = [chosen]
+    if has_proxy:
+        alt = not chosen
+        if alt:  # alt=True => 直连
+            if direct_ok:
+                candidates.append(alt)
+        else:  # alt=False => 走代理
+            if proxy_ok is not False:
+                candidates.append(alt)
+
+    # 去重且保序
+    seen = set()
+    candidates = [m for m in candidates if (m not in seen and not seen.add(m))]
+
+    # 应用 chosen
+    _apply_ms_bypass(chosen)
+
+    # 如果两边都不行，额外提示一下（不阻断运行，交给 SDK 报错）
+    if not direct_ok and (proxy_ok is False or not has_proxy):
+        proxy_hint = _redact_proxy_url(proxy_url) if proxy_url else "（未配置代理 URL，仅检测到环境变量）"
+        print(
+            f"⚠️  网络探测显示：直连不可用（{direct_detail}），代理也不可用（{proxy_hint} / {proxy_detail}）。"
+            "后续若报 WS_OPEN_ERROR，优先检查 WSL 代理地址/端口是否可达。"
+        )
+
+    return chosen, candidates
+
+
+EFFECTIVE_BYPASS_MS_PROXY, BYPASS_MODE_CANDIDATES = _init_network_mode()
 
 # ========= 2. 工具函数 =========
 
@@ -348,23 +576,28 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
     并捕获词语时间戳。
     返回合成音频的时长。
     """
-    cfg = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SERVICE_REGION)
-    cfg.set_speech_synthesis_output_format(
-        speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
-    )
-    cfg.set_property(
-        speechsdk.PropertyId.SpeechSynthesis_RtfTimeoutThreshold,
-        str(RTF_TIMEOUT_THRESHOLD),
-    )
-    cfg.set_property(
-        speechsdk.PropertyId.SpeechSynthesis_FrameTimeoutInterval,
-        str(FRAME_TIMEOUT_INTERVAL_MS),
-    )
-    if ENABLE_COMPRESSED_AUDIO_TRANSMISSION:
-        cfg.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_SynthEnableCompressedAudioTransmission,
-            "true",
+    def make_cfg():
+        cfg = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SERVICE_REGION)
+        cfg.set_speech_synthesis_output_format(
+            speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
         )
+        cfg.set_property(
+            speechsdk.PropertyId.SpeechSynthesis_RtfTimeoutThreshold,
+            str(RTF_TIMEOUT_THRESHOLD),
+        )
+        cfg.set_property(
+            speechsdk.PropertyId.SpeechSynthesis_FrameTimeoutInterval,
+            str(FRAME_TIMEOUT_INTERVAL_MS),
+        )
+        if ENABLE_COMPRESSED_AUDIO_TRANSMISSION:
+            cfg.set_property(
+                speechsdk.PropertyId.SpeechServiceConnection_SynthEnableCompressedAudioTransmission,
+                "true",
+            )
+        return cfg
+
+    bypass_modes = BYPASS_MODE_CANDIDATES
+    bypass_idx = 0
 
     attempt = 0
     while True:
@@ -372,6 +605,11 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
             word_boundaries.clear()
             if attempt > 0 and os.path.exists(outfile):
                 os.remove(outfile)
+
+            # 根据当前模式调整 NO_PROXY（决定微软域名是直连还是走代理）
+            _apply_ms_bypass(bypass_modes[bypass_idx])
+
+            cfg = make_cfg()
             synthesizer = speechsdk.SpeechSynthesizer(
                 speech_config=cfg,
                 audio_config=speechsdk.audio.AudioConfig(filename=outfile),
@@ -387,9 +625,32 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
             else:
                 raise RuntimeError(result.reason)
         except Exception as e:
+            msg = str(e)
+            is_timeout = (
+                ("Timeout while synthesizing" in msg)
+                or ("RTF" in msg)
+                or ("frame interval" in msg)
+            )
+            if AUTO_SPLIT_ON_TIMEOUT and is_timeout:
+                raise
+
             attempt += 1
             if attempt > RETRY_COUNT:
                 raise
+
+            is_connection_error = (
+                "WS_OPEN_ERROR" in msg
+                or "no connection to the remote host" in msg
+                or "Connection failed" in msg
+                or "UNDERLYING_IO_OPEN_FAILED" in msg
+            )
+            if is_connection_error and bypass_idx + 1 < len(bypass_modes):
+                bypass_idx += 1
+                mode = "直连微软域名" if bypass_modes[bypass_idx] else "让微软域名走代理"
+                print(f"[网络切换] 检测到连接失败，切换为：{mode}，{RETRY_INTERVAL}s 后重试")
+                time.sleep(RETRY_INTERVAL)
+                continue
+
             print(f"[重试] 第 {attempt}/{RETRY_COUNT} 次失败：{e}，{RETRY_INTERVAL}s 后重试")
             time.sleep(RETRY_INTERVAL)
 
@@ -412,8 +673,36 @@ def concat_wav(parts: list, output: str):
 # ========= 3. 主入口 =========
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--probe-network":
+        host = _tts_host(SERVICE_REGION)
+        proxy_url = _effective_proxy_url()
+        direct_ok, direct_detail = _tls_probe(host)
+        proxy_ok, proxy_detail = _proxy_connect_then_tls_probe(proxy_url, host)
+
+        print(f"[探测] 目标: {host}:443")
+        print(f"  直连(TLS): {'OK' if direct_ok else 'FAIL'}  ({direct_detail})")
+        if proxy_url or _has_proxy_env():
+            shown = _redact_proxy_url(proxy_url) if proxy_url else "（未配置 proxy，但检测到环境变量）"
+            ok_str = "OK" if proxy_ok is True else ("UNKNOWN" if proxy_ok is None else "FAIL")
+            print(f"  代理(CONNECT+TLS via {shown}): {ok_str}  ({proxy_detail})")
+        else:
+            print("  代理: 未配置")
+
+        if direct_ok and (proxy_ok is False or not (proxy_url or _has_proxy_env())):
+            recommended = "bypassMicrosoftProxy=true（直连）"
+        elif proxy_ok is True and not direct_ok:
+            recommended = "bypassMicrosoftProxy=false（走代理）"
+        elif direct_ok and proxy_ok is True:
+            recommended = f"两者都通，按配置偏好（当前 bypassMicrosoftProxy={str(BYPASS_MS_PROXY).lower()}）"
+        else:
+            recommended = "两者都不通/不确定：优先修代理或网络"
+
+        print(f"[建议] {recommended}")
+        sys.exit(0)
+
     if len(sys.argv) < 2:
         print("用法: python3 long_tts_with_srt.py <input.txt> [output.wav]")
+        print("      python3 long_tts_with_srt.py --probe-network")
         sys.exit(1)
 
     txt_path = sys.argv[1]
@@ -467,10 +756,17 @@ def main():
         except Exception as e:
             msg = str(e)
             is_timeout = ("Timeout while synthesizing" in msg) or ("RTF" in msg) or ("frame interval" in msg)
-            if AUTO_SPLIT_ON_TIMEOUT and is_timeout and len(seg) > TIMEOUT_SPLIT_LIMIT:
-                smaller = split_text(seg, limit=TIMEOUT_SPLIT_LIMIT)
+            if AUTO_SPLIT_ON_TIMEOUT and is_timeout:
+                # 若当前段已经不超过 TIMEOUT_SPLIT_LIMIT，仍可能因网络/阈值导致超时；
+                # 此时用更小的动态 limit 再拆一轮，避免反复卡死在同一个段长度上。
+                new_limit = TIMEOUT_SPLIT_LIMIT
+                if TIMEOUT_SPLIT_LIMIT <= 0:
+                    new_limit = 0
+                elif len(seg) <= TIMEOUT_SPLIT_LIMIT:
+                    new_limit = max(200, int(len(seg) * 0.6))
+                smaller = split_text(seg, limit=new_limit)
                 if len(smaller) > 1:
-                    print(f"[自动切分] 当前段疑似超时，拆成 {len(smaller)} 段后重试（limit={TIMEOUT_SPLIT_LIMIT}）")
+                    print(f"[自动切分] 当前段疑似超时，拆成 {len(smaller)} 段后重试（limit={new_limit}）")
                     segments = segments[:i] + smaller + segments[i+1:]
                     continue
             raise
