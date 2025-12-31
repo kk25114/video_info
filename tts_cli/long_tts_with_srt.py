@@ -58,7 +58,7 @@ DEFAULT_CONFIG = {
     "autoSplitOnTimeout": True,
     "timeoutSplitLimit": 1200,
     "proxy": "",
-    "bypassMicrosoftProxy": True
+    "bypassMicrosoftProxy": False
 }
 
 if not os.path.isfile(CONFIG_PATH):
@@ -206,6 +206,25 @@ def _redact_proxy_url(proxy_url: str) -> str:
     host = u.hostname or ""
     port = f":{u.port}" if u.port else ""
     return f"{u.scheme}://***:***@{host}{port}"
+
+
+def _apply_speechsdk_proxy(cfg, enable: bool):
+    if not enable:
+        return
+    proxy_url = _normalize_proxy_url(_effective_proxy_url())
+    if not proxy_url:
+        return
+    u = urlparse(proxy_url)
+    host = u.hostname
+    if not host:
+        return
+    port = u.port or (443 if u.scheme == "https" else 80)
+    username = unquote(u.username) if u.username else ""
+    password = unquote(u.password) if u.password else ""
+    try:
+        cfg.set_proxy(host, port, username, password)
+    except Exception:
+        pass
 
 
 def _proxy_connect_then_tls_probe(
@@ -576,7 +595,7 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
     并捕获词语时间戳。
     返回合成音频的时长。
     """
-    def make_cfg():
+    def make_cfg(use_proxy: bool):
         cfg = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SERVICE_REGION)
         cfg.set_speech_synthesis_output_format(
             speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
@@ -594,6 +613,7 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
                 speechsdk.PropertyId.SpeechServiceConnection_SynthEnableCompressedAudioTransmission,
                 "true",
             )
+        _apply_speechsdk_proxy(cfg, use_proxy)
         return cfg
 
     bypass_modes = BYPASS_MODE_CANDIDATES
@@ -609,7 +629,8 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
             # 根据当前模式调整 NO_PROXY（决定微软域名是直连还是走代理）
             _apply_ms_bypass(bypass_modes[bypass_idx])
 
-            cfg = make_cfg()
+            use_proxy = not bypass_modes[bypass_idx]
+            cfg = make_cfg(use_proxy)
             synthesizer = speechsdk.SpeechSynthesizer(
                 speech_config=cfg,
                 audio_config=speechsdk.audio.AudioConfig(filename=outfile),
