@@ -174,6 +174,18 @@ def setup_proxy():
 
 setup_proxy()
 
+PROXY_ENV_KEYS = (
+    "http_proxy",
+    "https_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "all_proxy",
+    "ftp_proxy",
+    "FTP_PROXY",
+)
+PROXY_ENV_BASE = {k: os.environ.get(k) for k in PROXY_ENV_KEYS}
+
 
 def _normalize_proxy_url(raw: str) -> str:
     raw = (raw or "").strip()
@@ -225,6 +237,18 @@ def _apply_speechsdk_proxy(cfg, enable: bool):
         cfg.set_proxy(host, port, username, password)
     except Exception:
         pass
+
+
+def _apply_proxy_env(use_proxy: bool):
+    if use_proxy:
+        for key, value in PROXY_ENV_BASE.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        return
+    for key in PROXY_ENV_KEYS:
+        os.environ.pop(key, None)
 
 
 def _proxy_connect_then_tls_probe(
@@ -630,6 +654,7 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
             _apply_ms_bypass(bypass_modes[bypass_idx])
 
             use_proxy = not bypass_modes[bypass_idx]
+            _apply_proxy_env(use_proxy)
             cfg = make_cfg(use_proxy)
             synthesizer = speechsdk.SpeechSynthesizer(
                 speech_config=cfg,
