@@ -48,6 +48,33 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 
 # 全局变量，用于懒加载 ASR 模型，避免重复加载
 asr_model = None
+YOUTUBE_COOKIES_PATH = '/home/github/video_info/cookies.txt'
+YTDLP_AUDIO_FORMAT = (
+    '18/'
+    'best[ext=mp4][protocol=https]/'
+    'bestaudio[ext=m4a][protocol=https]/'
+    'bestaudio[protocol=https]/'
+    'bestaudio/'
+    'best'
+)
+
+
+def get_yt_dlp_runtime_args():
+    """优先启用 Node.js 运行时，避免 yt-dlp 在 YouTube 提取阶段缺少 JS 运行时。"""
+    node_path = shutil.which('node')
+    if node_path:
+        return ['--js-runtimes', f'node:{node_path}']
+    deno_path = shutil.which('deno')
+    if deno_path:
+        return ['--js-runtimes', f'deno:{deno_path}']
+    return []
+
+
+def get_youtube_cookies_args():
+    """如果 cookies 文件存在则返回对应参数。"""
+    if os.path.isfile(YOUTUBE_COOKIES_PATH):
+        return ['--cookies', YOUTUBE_COOKIES_PATH]
+    return []
 
 def _read_json_bool(obj, key, default=None):
     try:
@@ -184,7 +211,8 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
         # 构造 yt-dlp 命令（列表阶段不强制客户端，避免无谓的 403）
         command = [
             'yt-dlp',
-            '--cookies', '/home/github/video_info/cookies.txt',
+            *get_yt_dlp_runtime_args(),
+            *get_youtube_cookies_args(),
             '--flat-playlist'
         ]
         
@@ -335,27 +363,22 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
     try:
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
-
-        # 1.1 自适应模式（不强制客户端），参考 spacedownload/m4a_download.py
-        def _choose_youtube_cookies():
-            # 仅使用用户指定的 cookies 文件
-            fixed = '/home/github/video_info/cookies.txt'
-            return fixed if os.path.isfile(fixed) else None
-
-        ck = _choose_youtube_cookies()
+        runtime_args = get_yt_dlp_runtime_args()
+        cookies_args = get_youtube_cookies_args()
 
         def build_auto_cmd(with_cookies: bool):
             cmd = [
                 'yt-dlp',
-                '-f', 'best/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio',
-                '--hls-prefer-native', '--concurrent-fragments', '16',
+                *runtime_args,
+                '-f', YTDLP_AUDIO_FORMAT,
+                '--check-formats',
                 '--no-playlist',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
                 '--output', audio_path,
                 video_url
             ]
-            if with_cookies and ck:
-                cmd[1:1] = ['--cookies', ck]
+            if with_cookies and cookies_args:
+                cmd[1:1] = cookies_args
             return cmd
 
         # 仅保留两种策略：自适应(带cookies) -> 自适应(不带cookies)
@@ -484,19 +507,34 @@ def get_next_file_index(output_dir):
 def get_video_title(video_url):
     """使用 yt-dlp 获取视频的原始标题。"""
     print("--> 正在获取视频原始标题...")
-    try:
-        command = [
-            'yt-dlp',
-            '--cookies', '/home/github/video_info/cookies.txt',
-            '--print', 'title', '--no-playlist', video_url
-        ]
-        result = subprocess.run(
-            command, capture_output=True, text=True, check=True, timeout=30
-        )
-        return result.stdout.strip()
-    except Exception as e:
-        print(f"--> 获取原始标题时出错: {e}")
-        return None
+    runtime_args = get_yt_dlp_runtime_args()
+    cookies_args = get_youtube_cookies_args()
+
+    attempts = []
+    if cookies_args:
+        attempts.append(("带cookies", cookies_args))
+    attempts.append(("不带cookies", []))
+
+    for desc, extra_args in attempts:
+        try:
+            command = [
+                'yt-dlp',
+                *runtime_args,
+                *extra_args,
+                '--print', 'title',
+                '--no-playlist',
+                video_url
+            ]
+            result = subprocess.run(
+                command, capture_output=True, text=True, check=True, timeout=30
+            )
+            title = result.stdout.strip()
+            if title:
+                return title
+        except Exception as e:
+            print(f"--> 获取原始标题失败({desc}): {e}")
+
+    return None
 
 # 已移除 get_video_upload_date（未使用，且元数据阶段不再强制客户端）
 
