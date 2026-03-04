@@ -381,10 +381,10 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 cmd[1:1] = cookies_args
             return cmd
 
-        # 仅保留两种策略：自适应(带cookies) -> 自适应(不带cookies)
+        # 仅保留两种策略：自适应(不带cookies) -> 自适应(带cookies)
         strategies = [
-            ("自适应(带cookies)", build_auto_cmd(True)),
             ("自适应(不带cookies)", build_auto_cmd(False)),
+            ("自适应(带cookies)", build_auto_cmd(True)),
         ]
 
         last_err = None
@@ -510,10 +510,9 @@ def get_video_title(video_url):
     runtime_args = get_yt_dlp_runtime_args()
     cookies_args = get_youtube_cookies_args()
 
-    attempts = []
+    attempts = [("不带cookies", [])]
     if cookies_args:
         attempts.append(("带cookies", cookies_args))
-    attempts.append(("不带cookies", []))
 
     for desc, extra_args in attempts:
         try:
