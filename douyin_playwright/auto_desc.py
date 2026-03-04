@@ -87,8 +87,19 @@ def _clean_text(text: str) -> str:
     ]
     for pat in patterns:
         cleaned = re.sub(pat, "", cleaned)
-    # 去掉模型常见无效前缀
-    cleaned = re.sub(r"^视频分析了", "", cleaned)
+    # 去掉模型常见无效前缀（禁止“本视频/该视频/此视频/视频剖析”等发布口吻）
+    meta_lead_patterns = [
+        r"^\s*(?:本|该|此|这)(?:期)?视频(?:中)?(?:主要)?(?:围绕|聚焦|剖析|分析|解读|讲述|讲解|介绍|探讨|讨论)?[：:\s，,。]*",
+        r"^\s*视频(?:中)?(?:主要)?(?:围绕|聚焦|剖析|分析|解读|讲述|讲解|介绍|探讨|讨论)?[：:\s，,。]*",
+        r"^\s*(?:本文|这篇|本期(?:内容)?|这期(?:内容)?)(?:中)?(?:主要)?(?:围绕|聚焦|剖析|分析|解读|讲述|讲解|介绍|探讨|讨论)?[：:\s，,。]*",
+    ]
+    # 允许连续清洗多层前缀，如“本视频主要分析：视频剖析……”
+    for _ in range(3):
+        before = cleaned
+        for pat in meta_lead_patterns:
+            cleaned = re.sub(pat, "", cleaned)
+        if cleaned == before:
+            break
     return cleaned
 
 
@@ -126,7 +137,9 @@ def _limit_topics(line: str, max_count: int) -> str:
 def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tuple[str, str]:
     prompt = (
         f"请阅读以下简介与话题，生成两条输出：\n"
-        f"1. 中文简介摘要，不超过{max_chars}个字。直接回复，不要任何解释。\n"
+        f"1. 中文简介摘要，不超过{max_chars}个字。直接回复，不要任何解释。"
+        f"不要使用“本视频/该视频/此视频/这期视频/视频剖析/视频分析/视频解读/本文”等自指或导语词，"
+        f"直接陈述核心观点。\n"
         f"2. 中文话题串，最多{TOPIC_MAX}个，话题用空格分隔，保留#号。\n\n"
         f"【简介】\n{intro}\n\n【话题】\n{topics}\n"
     )
