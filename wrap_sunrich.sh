@@ -20,14 +20,20 @@
 #
 # 使用示例：
 #   # 添加到crontab，每小时检查一次
-#   0 * * * * /home/github/video_info/wrap_sunrich.sh
+#   0 * * * * /home/github/video_info/wrap_sunrich.sh >> /home/github/video_info/cron_get_transcripts.log 2>&1
 #
 #   # 手动执行
 #   ./wrap_sunrich.sh
 
-> /home/github/video_info/cron_get_transcripts.log
+set -euo pipefail
 
-set -e
+export HOME="/home/yank"
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export LANG="C.UTF-8"
+export LC_ALL="C.UTF-8"
+
+LOG_FILE="/home/github/video_info/cron_get_transcripts.log"
+echo "=== wrap_sunrich.sh 开始 - $(date '+%Y-%m-%d %H:%M:%S') ==="
 
 # ---- 代理配置 ----
 export HTTP_PROXY="http://172.23.240.1:10806"
@@ -53,9 +59,9 @@ PY
   )
   if [ -n "$TOK" ]; then
     export YT_PO_TOKEN="$TOK"
-    echo "🔑 已从 config.json 注入 YT_PO_TOKEN" >> /home/github/video_info/cron_get_transcripts.log
+    echo "🔑 已从 config.json 注入 YT_PO_TOKEN"
   else
-    echo "ℹ️ 未在 config.json 中发现 YT_PO_TOKEN（可选）。" >> /home/github/video_info/cron_get_transcripts.log
+    echo "ℹ️ 未在 config.json 中发现 YT_PO_TOKEN（可选）。"
   fi
 fi
 
@@ -63,37 +69,76 @@ CHANNEL_URL="https://www.youtube.com/@sunriches/videos"
 OUTPUT_DIR="2.sunrich"
 SAVE_DIR="mk_video"
 
-# ---------- -1. 清理旧的临时文件，避免权限问题 ----------
-sudo rm -f /tmp/md_before.txt /tmp/md_after.txt
+mkdir -p "$SAVE_DIR"
+
+TMP_BEFORE=$(mktemp)
+TMP_AFTER=$(mktemp)
+cleanup() {
+  rm -f "$TMP_BEFORE" "$TMP_AFTER"
+}
+trap cleanup EXIT
 
 # ---------- 0. 记录现有 Markdown ----------
-find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | sort > /tmp/md_before.txt
+find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | LC_ALL=C sort > "$TMP_BEFORE"
 
 # ---------- 1. 抓取最新视频并生成文稿 ----------
 /usr/bin/python3 get_transcripts.py "$CHANNEL_URL" \
   --output_dir "$OUTPUT_DIR" --auto-commit --summarize --correct --candidate-size 7
 
 # ---------- 2. 计算新增 Markdown ----------
-find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | sort > /tmp/md_after.txt
-NEW_MD=$(comm -13 /tmp/md_before.txt /tmp/md_after.txt)
+find "$OUTPUT_DIR" -maxdepth 1 -name '*.md' | LC_ALL=C sort > "$TMP_AFTER"
+mapfile -t NEW_MD_ARRAY < <(/usr/bin/python3 - "$TMP_BEFORE" "$TMP_AFTER" <<'PY'
+import sys
+from pathlib import Path
+
+before = set(Path(sys.argv[1]).read_text(encoding="utf-8").splitlines())
+after = Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
+for path in after:
+    if path and path not in before:
+        print(path)
+PY
+)
+
+# 如果本轮没有检测到新增 md，但最新 md 没有对应 wav/srt，则进入恢复模式补做一次
+if [ "${#NEW_MD_ARRAY[@]}" -eq 0 ]; then
+  LATEST_MD=$(ls -t -- "$OUTPUT_DIR"/*.md 2>/dev/null | head -n1 || true)
+  if [ -n "${LATEST_MD:-}" ]; then
+    base=$(basename "$LATEST_MD" .md)
+    wav="$SAVE_DIR/${base}.wav"
+    srt="$SAVE_DIR/${base}.srt"
+    if [ ! -f "$wav" ] || [ ! -f "$srt" ]; then
+      echo "♻️ 恢复模式：最新文稿缺少 wav/srt，补做 TTS -> $LATEST_MD"
+      NEW_MD_ARRAY=("$LATEST_MD")
+    fi
+  fi
+fi
+
+if [ "${#NEW_MD_ARRAY[@]}" -eq 0 ]; then
+  echo "ℹ️ 本次没有新增文稿，且最新文稿的 wav/srt 已存在，无需合成。"
+  echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ==="
+  exit 0
+fi
 
 # ---------- 3. 清空目标目录的旧音频和字幕 ----------
 echo "🧹 清理 $SAVE_DIR 目录中的旧音频和字幕文件..."
-rm -f "$SAVE_DIR"/*.wav "$SAVE_DIR"/*.srt
+rm -f "$SAVE_DIR"/*.wav "$SAVE_DIR"/*.srt 2>/dev/null || true
 echo "   清理完成"
-echo "🧹 旧音频和字幕文件清理完成" >> /home/github/video_info/cron_get_transcripts.log
+echo "🧹 旧音频和字幕文件清理完成"
 
 # ---------- 4. 对新增文稿逐个合成语音 ----------
-for md in $NEW_MD; do
-  [[ -z "$md" ]] && continue  # 防止 NEW_MD 为空时报错
+for md in "${NEW_MD_ARRAY[@]}"; do
+  [[ -z "$md" ]] && continue
   base=$(basename "$md" .md)
   wav="$SAVE_DIR/${base}.wav"
   echo "⚙️  合成 $md -> $wav"
-  /usr/bin/python3 tts_cli/long_tts_with_srt.py "$md" "$wav" >> /home/github/video_info/cron_get_transcripts.log 2>&1
+  if ! /usr/bin/python3 tts_cli/long_tts_with_srt.py "$md" "$wav"; then
+    echo "❌ 语音合成失败: $md"
+    exit 1
+  fi
   echo "   完成 $wav"
-  echo "✅ 语音合成完成: $wav" >> /home/github/video_info/cron_get_transcripts.log
+  echo "✅ 语音合成完成: $wav"
 done
 
-echo "✅ wrap_sunrich.sh 完成，本次新增 $(echo "$NEW_MD" | wc -w) 篇"
-echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ===" >> /home/github/video_info/cron_get_transcripts.log
-echo "📈 本次执行总结: 新增 $(echo "$NEW_MD" | wc -w) 篇文稿" >> /home/github/video_info/cron_get_transcripts.log
+echo "✅ wrap_sunrich.sh 完成，本次处理 ${#NEW_MD_ARRAY[@]} 篇"
+echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ==="
+echo "📈 本次执行总结: 处理 ${#NEW_MD_ARRAY[@]} 篇文稿"
