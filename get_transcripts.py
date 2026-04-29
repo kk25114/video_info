@@ -57,6 +57,9 @@ YTDLP_AUDIO_FORMAT = (
     'bestaudio/'
     'best'
 )
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
 
 
 def get_yt_dlp_runtime_args():
@@ -308,7 +311,7 @@ def summarize_with_deepseek(transcript_text):
         print('    -> {"DEEPSEEK_API_KEY": "sk-xxxxxxxxxxxxxxxxxxxx"}')
         return None
 
-    api_url = "https://api.deepseek.com/chat/completions"
+    api_url = DEEPSEEK_CHAT_COMPLETIONS_URL
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -326,12 +329,12 @@ def summarize_with_deepseek(transcript_text):
     )
 
     data = {
-        "model": "deepseek-chat",
+        "model": DEEPSEEK_MODEL,
         "messages": [{"role": "user", "content": prompt}],
     }
 
     try:
-        print(f"    1/2: 正在向 DeepSeek API (deepseek-chat) 发送请求...")
+        print(f"    1/2: 正在向 DeepSeek API ({DEEPSEEK_MODEL}) 发送请求...")
         session = build_deepseek_session()
         response = session.post(api_url, headers=headers, json=data, timeout=180)
         response.raise_for_status()
@@ -566,7 +569,7 @@ def generate_ai_summary(transcript_text):
         print(f"    -> 警告: 未找到 DeepSeek API Key。已跳过此步骤。")
         return None
 
-    api_url = "https://api.deepseek.com/chat/completions"
+    api_url = DEEPSEEK_CHAT_COMPLETIONS_URL
     
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -584,7 +587,7 @@ def generate_ai_summary(transcript_text):
     )
 
     data = {
-        "model": "deepseek-chat",
+        "model": DEEPSEEK_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"}
     }
@@ -627,7 +630,7 @@ def correct_transcript_with_deepseek(transcript_text):
         print("    -> 未找到 DEEPSEEK_API_KEY，跳过校正。")
         return transcript_text
 
-    api_url = "https://api.deepseek.com/chat/completions"
+    api_url = DEEPSEEK_CHAT_COMPLETIONS_URL
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -643,7 +646,7 @@ def correct_transcript_with_deepseek(transcript_text):
     )
 
     data = {
-        "model": "deepseek-chat",
+        "model": DEEPSEEK_MODEL,
         "messages": [{"role": "user", "content": prompt}],
     }
 

@@ -27,6 +27,10 @@
 """
 import cv2, numpy as np, os, math, hashlib, subprocess, shlex, json, re, requests
 
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
+DEEPSEEK_MODEL = "deepseek-v4-pro"
+
 def analyze_text_with_deepseek(text: str):
     """使用 DeepSeek API 分析文本，返回摘要和关键词。"""
     print("🤖 调用 DeepSeek API 进行内容分析...")
@@ -43,7 +47,7 @@ def analyze_text_with_deepseek(text: str):
         print("❌ 错误: 未在 config.json 中找到 DEEPSEEK_API_KEY，无法进行 AI 分析。")
         return None
 
-    api_url = "https://api.deepseek.com/chat/completions"
+    api_url = DEEPSEEK_CHAT_COMPLETIONS_URL
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -60,7 +64,7 @@ def analyze_text_with_deepseek(text: str):
     )
 
     data = {
-        "model": "deepseek-chat",
+        "model": DEEPSEEK_MODEL,
         "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"}
     }
@@ -360,7 +364,7 @@ def find_latest_srt_file():
     print(f"📁 找到 {len(srt_files)} 个字幕文件，使用最新的: {srt_files[0][2]}")
     return latest_file
 
-import cv2, numpy as np, argparse, os, math, hashlib, subprocess, shlex, json, re, requests\n\ndef parse_srt_file(file_path: str) -> str:\n    \"\"\"读取 SRT 文件并提取所有文本内容。\"\"\"\n    try:\n        with open(file_path, \'r\', encoding=\'utf-8\') as f:\n            content = f.read()\n        # 使用正则表达式移除序号、时间戳和空行，只留下文本\n        text_only = re.sub(r\'\\d+\\n\\d{2}:\\d{2}:\\d{2},\\d{3} --> \\d{2}:\\d{2}:\\d{2},\\d{3}\\n\', \'\', content)\n        return text_only.strip()\n    except FileNotFoundError:\n        print(f\"❌ 错误: 字幕文件未找到 -> {file_path}\")\n        return \"\"\n    except Exception as e:\n        print(f\"❌ 读取或解析 SRT 文件时出错: {e}\")\n        return \"\"\n\ndef analyze_text_with_deepseek(text: str):\n    \"\"\"使用 DeepSeek API 分析文本，返回摘要和关键词。\"\"\"\n    print(\"🤖 调用 DeepSeek API 进行内容分析...\")\n    config_path = \'/home/github/video_info/config.json\'\n    api_key = None\n    if os.path.exists(config_path):\n        try:\n            with open(config_path, \'r\', encoding=\'utf-8\') as f:\n                api_key = json.load(f).get(\"DEEPSEEK_API_KEY\")\n        except Exception as e:\n            print(f\"⚠️ 读取配置文件 {config_path} 时出错: {e}\")\n\n    if not api_key:\n        print(\"❌ 错误: 未在 config.json 中找到 DEEPSEEK_API_KEY，无法进行 AI 分析。\")\n        return None\n\n    api_url = \"https://api.deepseek.com/chat/completions\"\n    headers = {\n        \"Authorization\": f\"Bearer {api_key}\",\n        \"Content-Type\": \"application/json\",\n    }\n\n    prompt = (\n        \"你是一名资深新闻编辑。请阅读以下视频文稿，并以严格的 JSON 格式完成两项任务：\\n\"\n        \"1. `summary`: 生成一段不超过150字的摘要，精准概括文稿讨论的核心新闻事件。\\n\"\n        \"2. `keywords`: 提取3个最适合用于搜索相关新闻的关键词（字符串数组）。\\n\\n\"\n        \"确保你的回复只有纯粹的 JSON 对象，不包含任何额外的解释或标记。\\n\\n\"\n        \"--- 文稿开始 ---\\n\"\n        f\"{text}\\n\"\n        \"--- 文稿结束 ---\"\n    )\n\n    data = {\n        \"model\": \"deepseek-chat\",\n        \"messages\": [{\"role\": \"user\", \"content\": prompt}],\n        \"response_format\": {\"type\": \"json_object\"}\n    }\n\n    try:\n        response = requests.post(api_url, headers=headers, json=data, timeout=180)\n        response.raise_for_status()\n        content_str = response.json()[\'choices\'][0][\'message\'][\'content\']\n        analysis_data = json.loads(content_str)\n        \n        if \'summary\' in analysis_data and \'keywords\' in analysis_data:\n            print(\"✅ AI 内容分析完成。\")\n            return analysis_data\n        else:\n            print(\"❌ 错误: AI 返回的 JSON 格式不符合预期。\")\n            return None\n    except requests.exceptions.RequestException as e:\n        print(f\"❌ 错误: 调用 DeepSeek API 时出错: {e}\")\n        return None\n    except (KeyError, IndexError, json.JSONDecodeError) as e:\n        print(f\"❌ 错误: 解析 AI 响应时出错: {e}\")\n        return None\n\ndef search_recent_articles(keywords: list) -> list:\n    \"\"\"使用关键词搜索最近一周的热门文章，返回文章URL列表。\"\"\"\n    print(f\"🌐 正在搜索最近一周的热门文章，关键词: {keywords}...\")\n    query = \" \".join(keywords) + \" 最新一周\"\n    # 使用 default_api.google_web_search 工具进行搜索\n    search_results = default_api.google_web_search(query=query)\n    \n    articles = []\n    if search_results and \'output\' in search_results:\n        # 假设搜索结果是文本，需要解析出URL\n        # 这是一个简化的解析，实际可能需要更复杂的正则或HTML解析\n        # 目前我们只提取看起来像URL的字符串\n        urls = re.findall(r\'(https?://[^\s]+)\', search_results[\'output\'])\n        # 过滤掉一些明显不是文章链接的URL，例如图片链接、PDF等\n        articles = [url for url in urls if not any(ext in url for ext in [\'.png\', \'.jpg\', \'.pdf\', \'.gif\'])]\n        print(f\"✅ 找到 {len(articles)} 篇文章链接。\")\n    else:\n        print(\"⚠️ 未找到相关文章。\")\n    return articles\n\ndef main():
+def main():
     # 自动查找最新的字幕文件
     srt_file = find_latest_srt_file()
     if not srt_file:

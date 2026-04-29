@@ -30,6 +30,9 @@ echo "-----------------------------------------"
 echo "🚀 开始自动同步到 GitHub..."
 echo "-----------------------------------------"
 
+DEEPSEEK_BASE_URL="https://api.deepseek.com"
+DEEPSEEK_MODEL="deepseek-v4-pro"
+
 # 进入脚本所在的目录，以确保 git 命令在正确的仓库中执行
 cd "$(dirname "$0")"
 
@@ -58,7 +61,7 @@ echo "Git: 已暂存所有更改。"
 STATS=$(git diff --cached --shortstat)
 FILE_LIST=$(git diff --cached --name-status | sed 's/^/ - /' | head -n 100)
 
-AI_COMMIT_MESSAGE=$(env GIT_STATS="$STATS" GIT_FILE_LIST="$FILE_LIST" python3 - <<'PY'
+AI_COMMIT_MESSAGE=$(env GIT_STATS="$STATS" GIT_FILE_LIST="$FILE_LIST" DEEPSEEK_BASE_URL="$DEEPSEEK_BASE_URL" DEEPSEEK_MODEL="$DEEPSEEK_MODEL" python3 - <<'PY'
 import os, json, urllib.request, sys
 
 # 读取 API Key（与 get_transcripts.py 相同的配置方式）
@@ -75,6 +78,8 @@ if not api_key:
 
 stats = os.environ.get("GIT_STATS", "")
 files = os.environ.get("GIT_FILE_LIST", "")
+base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
 
 prompt = (
     "你是中文Git提交信息生成器。请根据以下已暂存变更生成一条不超过60字的中文单行提交信息："
@@ -84,13 +89,13 @@ prompt = (
 )
 
 data = {
-    "model": "deepseek-chat",
+    "model": model,
     "messages": [{"role": "user", "content": prompt}],
     "temperature": 0.2
 }
 
 req = urllib.request.Request(
-    "https://api.deepseek.com/chat/completions",
+    f"{base_url}/chat/completions",
     data=json.dumps(data).encode("utf-8"),
     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     method="POST"
