@@ -12,8 +12,9 @@ import requests
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "config.json"
 SUNRICH_DIR = REPO_ROOT / "2.sunrich"
-API_URL = "https://api.deepseek.com/v1/chat/completions"
-MODEL = "deepseek-chat"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+API_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
+MODEL = "deepseek-v4-flash"
 MAX_CHARS = 50
 TOPIC_MAX = 5
 

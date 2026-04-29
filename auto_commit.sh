@@ -31,7 +31,7 @@ echo "🚀 开始自动同步到 GitHub..."
 echo "-----------------------------------------"
 
 DEEPSEEK_BASE_URL="https://api.deepseek.com"
-DEEPSEEK_MODEL="deepseek-v4-pro"
+DEEPSEEK_MODEL="deepseek-v4-flash"
 
 # 进入脚本所在的目录，以确保 git 命令在正确的仓库中执行
 cd "$(dirname "$0")"
@@ -79,7 +79,7 @@ if not api_key:
 stats = os.environ.get("GIT_STATS", "")
 files = os.environ.get("GIT_FILE_LIST", "")
 base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 prompt = (
     "你是中文Git提交信息生成器。请根据以下已暂存变更生成一条不超过60字的中文单行提交信息："

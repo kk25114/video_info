@@ -29,7 +29,7 @@ import cv2, numpy as np, os, math, hashlib, subprocess, shlex, json, re, request
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-pro"
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 
 def analyze_text_with_deepseek(text: str):
     """使用 DeepSeek API 分析文本，返回摘要和关键词。"""
