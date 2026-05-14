@@ -29,6 +29,9 @@ import time
 import datetime
 import subprocess
 import json
+import multiprocessing as mp
+import queue
+import traceback
 import azure.cognitiveservices.speech as speechsdk
 import socket
 import ssl
@@ -57,6 +60,7 @@ DEFAULT_CONFIG = {
     "proactiveSplitLimit": 1200,
     "autoSplitOnTimeout": True,
     "timeoutSplitLimit": 1200,
+    "segmentTimeoutSeconds": 240,
     "proxy": "",
     "bypassMicrosoftProxy": False
 }
@@ -87,6 +91,7 @@ ENABLE_COMPRESSED_AUDIO_TRANSMISSION = bool(cfg["enableCompressedAudioTransmissi
 PROACTIVE_SPLIT_LIMIT = int(cfg["proactiveSplitLimit"])
 AUTO_SPLIT_ON_TIMEOUT = bool(cfg["autoSplitOnTimeout"])
 TIMEOUT_SPLIT_LIMIT = int(cfg["timeoutSplitLimit"])
+SEGMENT_TIMEOUT_SECONDS = int(cfg["segmentTimeoutSeconds"])
 PROXY           = cfg["proxy"]
 BYPASS_MS_PROXY = cfg["bypassMicrosoftProxy"]
 
@@ -613,6 +618,98 @@ def build_ssml(txt: str) -> str:
     return header + prosody + tail
 
 
+def _is_text_synthesis_timeout(msg: str) -> bool:
+    return (
+        "Timeout while synthesizing" in msg
+        or "RTF" in msg
+        or "frame interval" in msg
+    )
+
+
+def _is_startup_audio_timeout(msg: str) -> bool:
+    return "timeout waiting for the first audio chunk" in msg.lower()
+
+
+def _is_connection_error(msg: str) -> bool:
+    low = msg.lower()
+    return (
+        "WS_OPEN_ERROR" in msg
+        or "UNDERLYING_IO_OPEN_FAILED" in msg
+        or "no connection to the remote host" in low
+        or "connection failed" in low
+        or _is_startup_audio_timeout(msg)
+    )
+
+
+def _serialize_word_boundary(e) -> tuple:
+    duration_ticks = int(round(e.duration.total_seconds() * 10_000_000))
+    return (int(e.audio_offset), duration_ticks, e.text)
+
+
+def _synthesize_worker(ssml: str, outfile: str, result_queue):
+    boundaries = []
+    try:
+        duration = synthesize(ssml, outfile, boundaries)
+        duration_ticks = int(round(duration.total_seconds() * 10_000_000))
+        result_queue.put({
+            "ok": True,
+            "duration_ticks": duration_ticks,
+            "boundaries": [_serialize_word_boundary(e) for e in boundaries],
+        })
+    except Exception as e:
+        result_queue.put({
+            "ok": False,
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        })
+
+
+def synthesize_with_timeout(ssml: str, outfile: str, word_boundaries: list) -> datetime.timedelta:
+    """
+    Azure Speech SDK 的 speak_ssml_async(...).get() 偶尔不会按 SDK 配置超时返回。
+    用子进程包住单段合成，超时后终止子进程并重试，避免 cron 长时间挂起。
+    """
+    if SEGMENT_TIMEOUT_SECONDS <= 0:
+        return synthesize(ssml, outfile, word_boundaries)
+
+    attempt = 0
+    while True:
+        if attempt > 0 and os.path.exists(outfile):
+            os.remove(outfile)
+
+        result_queue = mp.Queue(maxsize=1)
+        proc = mp.Process(target=_synthesize_worker, args=(ssml, outfile, result_queue))
+        proc.start()
+        proc.join(SEGMENT_TIMEOUT_SECONDS)
+
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(10)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+            attempt += 1
+            if os.path.exists(outfile):
+                os.remove(outfile)
+            if attempt > RETRY_COUNT:
+                raise RuntimeError(f"Segment timeout after {SEGMENT_TIMEOUT_SECONDS}s")
+            print(f"[看门狗重试] 单段合成超过 {SEGMENT_TIMEOUT_SECONDS}s，已终止并重试 {attempt}/{RETRY_COUNT}，{RETRY_INTERVAL}s 后重试")
+            time.sleep(RETRY_INTERVAL)
+            continue
+
+        try:
+            result = result_queue.get_nowait()
+        except queue.Empty:
+            raise RuntimeError(f"Segment worker exited without result, exitcode={proc.exitcode}")
+
+        if result.get("ok"):
+            word_boundaries.clear()
+            word_boundaries.extend(result["boundaries"])
+            return datetime.timedelta(seconds=result["duration_ticks"] / 10_000_000)
+
+        raise RuntimeError(result.get("message") or result.get("traceback") or "Segment worker failed")
+
+
 def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timedelta:
     """
     调用 Azure Speech SDK 合成 ssml 保存为 outfile，
@@ -672,30 +769,20 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
                 raise RuntimeError(result.reason)
         except Exception as e:
             msg = str(e)
-            is_timeout = (
-                ("Timeout while synthesizing" in msg)
-                or ("RTF" in msg)
-                or ("frame interval" in msg)
-            )
-            if AUTO_SPLIT_ON_TIMEOUT and is_timeout:
-                raise
-
-            attempt += 1
-            if attempt > RETRY_COUNT:
-                raise
-
-            is_connection_error = (
-                "WS_OPEN_ERROR" in msg
-                or "no connection to the remote host" in msg
-                or "Connection failed" in msg
-                or "UNDERLYING_IO_OPEN_FAILED" in msg
-            )
+            is_connection_error = _is_connection_error(msg)
             if is_connection_error and bypass_idx + 1 < len(bypass_modes):
                 bypass_idx += 1
                 mode = "直连微软域名" if bypass_modes[bypass_idx] else "让微软域名走代理"
                 print(f"[网络切换] 检测到连接失败，切换为：{mode}，{RETRY_INTERVAL}s 后重试")
                 time.sleep(RETRY_INTERVAL)
                 continue
+
+            if AUTO_SPLIT_ON_TIMEOUT and _is_text_synthesis_timeout(msg):
+                raise
+
+            attempt += 1
+            if attempt > RETRY_COUNT:
+                raise
 
             print(f"[重试] 第 {attempt}/{RETRY_COUNT} 次失败：{e}，{RETRY_INTERVAL}s 后重试")
             time.sleep(RETRY_INTERVAL)
@@ -798,11 +885,10 @@ def main():
 
         chunk_boundaries = []
         try:
-            chunk_duration = synthesize(build_ssml(seg), out, chunk_boundaries)
+            chunk_duration = synthesize_with_timeout(build_ssml(seg), out, chunk_boundaries)
         except Exception as e:
             msg = str(e)
-            is_timeout = ("Timeout while synthesizing" in msg) or ("RTF" in msg) or ("frame interval" in msg)
-            if AUTO_SPLIT_ON_TIMEOUT and is_timeout:
+            if AUTO_SPLIT_ON_TIMEOUT and _is_text_synthesis_timeout(msg):
                 # 若当前段已经不超过 TIMEOUT_SPLIT_LIMIT，仍可能因网络/阈值导致超时；
                 # 此时用更小的动态 limit 再拆一轮，避免反复卡死在同一个段长度上。
                 new_limit = TIMEOUT_SPLIT_LIMIT
@@ -819,11 +905,16 @@ def main():
 
         # 为每个词语事件添加时间偏移并保存
         for e in chunk_boundaries:
-            duration_ticks = int(round(e.duration.total_seconds() * 10_000_000))
+            if isinstance(e, tuple):
+                audio_offset, duration_ticks, text = e
+            else:
+                audio_offset = int(e.audio_offset)
+                duration_ticks = int(round(e.duration.total_seconds() * 10_000_000))
+                text = e.text
             adjusted_event = (
-                int(e.audio_offset) + total_duration_ticks,
+                int(audio_offset) + total_duration_ticks,
                 duration_ticks,
-                e.text,
+                text,
             )
             all_word_boundaries.append(adjusted_event)
 
