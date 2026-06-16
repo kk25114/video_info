@@ -50,11 +50,11 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 asr_model = None
 YOUTUBE_COOKIES_PATH = '/home/github/video_info/cookies.txt'
 YTDLP_AUDIO_FORMAT = (
-    '18/'
-    'best[ext=mp4][protocol=https]/'
     'bestaudio[ext=m4a][protocol=https]/'
     'bestaudio[protocol=https]/'
     'bestaudio/'
+    '18/'
+    'best[ext=mp4][protocol=https]/'
     'best'
 )
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -66,10 +66,10 @@ def get_yt_dlp_runtime_args():
     """优先启用 Node.js 运行时，避免 yt-dlp 在 YouTube 提取阶段缺少 JS 运行时。"""
     node_path = shutil.which('node')
     if node_path:
-        return ['--js-runtimes', f'node:{node_path}']
+        return ['--js-runtimes', f'node:{node_path}', '--remote-components', 'ejs:github']
     deno_path = shutil.which('deno')
     if deno_path:
-        return ['--js-runtimes', f'deno:{deno_path}']
+        return ['--js-runtimes', f'deno:{deno_path}', '--remote-components', 'ejs:github']
     return []
 
 
