@@ -99,22 +99,8 @@ for path in after:
 PY
 )
 
-# 如果本轮没有检测到新增 md，但最新 md 没有对应 wav/srt，则进入恢复模式补做一次
 if [ "${#NEW_MD_ARRAY[@]}" -eq 0 ]; then
-  LATEST_MD=$(ls -t -- "$OUTPUT_DIR"/*.md 2>/dev/null | head -n1 || true)
-  if [ -n "${LATEST_MD:-}" ]; then
-    base=$(basename "$LATEST_MD" .md)
-    wav="$SAVE_DIR/${base}.wav"
-    srt="$SAVE_DIR/${base}.srt"
-    if [ ! -f "$wav" ] || [ ! -f "$srt" ]; then
-      echo "♻️ 恢复模式：最新文稿缺少 wav/srt，补做 TTS -> $LATEST_MD"
-      NEW_MD_ARRAY=("$LATEST_MD")
-    fi
-  fi
-fi
-
-if [ "${#NEW_MD_ARRAY[@]}" -eq 0 ]; then
-  echo "ℹ️ 本次没有新增文稿，且最新文稿的 wav/srt 已存在，无需合成。"
+  echo "ℹ️ 本次没有新增文稿，无需合成。"
   echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ==="
   exit 0
 fi
