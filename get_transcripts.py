@@ -39,11 +39,19 @@ import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# ---- 代理兜底设置 ----
-# 支持网络代理配置，确保在中国大陆环境也能正常访问YouTube
+USE_TUN_MODE = os.environ.get("VIDEO_INFO_USE_TUN", "").strip().lower() not in ("", "0", "false", "no")
 PROXY = "http://172.23.240.1:10806"
-for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
-    os.environ.setdefault(key, PROXY)
+PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
+
+# ---- 代理兜底设置 ----
+# TUN 模式下由系统接管路由，不再显式注入代理。
+if USE_TUN_MODE:
+    for key in PROXY_ENV_KEYS:
+        os.environ.pop(key, None)
+else:
+    # 支持网络代理配置，确保在中国大陆环境也能正常访问YouTube
+    for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+        os.environ.setdefault(key, PROXY)
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
 
 # 全局变量，用于懒加载 ASR 模型，避免重复加载
@@ -97,6 +105,9 @@ def should_deepseek_use_proxy(default=False):
     优先级：环境变量 DEEPSEEK_USE_PROXY > config.json: DEEPSEEK_USE_PROXY > default
     用户当前诉求：DeepSeek 不走代理，因此默认值设为 False。
     """
+    if USE_TUN_MODE:
+        return False
+
     # 环境变量优先
     env_val = os.environ.get("DEEPSEEK_USE_PROXY")
     if env_val is not None:

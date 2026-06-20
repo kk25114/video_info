@@ -35,9 +35,9 @@ export LC_ALL="C.UTF-8"
 LOG_FILE="/home/github/video_info/cron_get_transcripts.log"
 echo "=== wrap_sunrich.sh 开始 - $(date '+%Y-%m-%d %H:%M:%S') ==="
 
-# ---- 代理配置 ----
-export HTTP_PROXY="http://172.23.240.1:10806"
-export HTTPS_PROXY="http://172.23.240.1:10806"
+# ---- TUN 模式 ----
+# 本机代理已开启 TUN 时，不再向子进程注入显式 HTTP(S)_PROXY。
+export VIDEO_INFO_USE_TUN=1
 export NO_PROXY="localhost,127.0.0.1,::1"
 
 cd /home/github/video_info

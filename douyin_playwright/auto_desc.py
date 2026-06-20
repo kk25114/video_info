@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import json
 import re
 from pathlib import Path
@@ -17,6 +18,7 @@ API_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
 MODEL = "deepseek-v4-flash"
 MAX_CHARS = 50
 TOPIC_MAX = 5
+USE_TUN_MODE = os.environ.get("VIDEO_INFO_USE_TUN", "").strip().lower() not in ("", "0", "false", "no")
 
 
 def _load_api_key() -> Optional[str]:
@@ -158,7 +160,17 @@ def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tup
         "temperature": 0.3,
     }
 
-    resp = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+    session = requests.Session()
+    if USE_TUN_MODE:
+        session.trust_env = False
+        session.proxies = {}
+    else:
+        use_proxy = os.environ.get("DEEPSEEK_USE_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
+        if not use_proxy:
+            session.trust_env = False
+            session.proxies = {}
+
+    resp = session.post(API_URL, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     content = data["choices"][0]["message"]["content"].strip()

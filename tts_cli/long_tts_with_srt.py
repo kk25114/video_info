@@ -94,6 +94,12 @@ TIMEOUT_SPLIT_LIMIT = int(cfg["timeoutSplitLimit"])
 SEGMENT_TIMEOUT_SECONDS = int(cfg["segmentTimeoutSeconds"])
 PROXY           = cfg["proxy"]
 BYPASS_MS_PROXY = cfg["bypassMicrosoftProxy"]
+USE_TUN_MODE = os.environ.get("VIDEO_INFO_USE_TUN", "").strip().lower() not in ("", "0", "false", "no")
+
+if USE_TUN_MODE:
+    # TUN 模式下由系统/客户端接管转发，这里不再显式注入代理或切换到代理。
+    PROXY = ""
+    BYPASS_MS_PROXY = True
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -172,6 +178,10 @@ def merge_no_proxy(hosts):
 
 def setup_proxy():
     keys = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ftp_proxy", "FTP_PROXY")
+    if USE_TUN_MODE:
+        for key in keys:
+            os.environ.pop(key, None)
+        return
     if PROXY:
         for key in keys:
             os.environ.setdefault(key, PROXY)
@@ -202,6 +212,8 @@ def _normalize_proxy_url(raw: str) -> str:
 
 
 def _effective_proxy_url() -> str:
+    if USE_TUN_MODE:
+        return ""
     if PROXY:
         return PROXY
     return (
@@ -226,7 +238,7 @@ def _redact_proxy_url(proxy_url: str) -> str:
 
 
 def _apply_speechsdk_proxy(cfg, enable: bool):
-    if not enable:
+    if USE_TUN_MODE or not enable:
         return
     proxy_url = _normalize_proxy_url(_effective_proxy_url())
     if not proxy_url:
@@ -245,6 +257,10 @@ def _apply_speechsdk_proxy(cfg, enable: bool):
 
 
 def _apply_proxy_env(use_proxy: bool):
+    if USE_TUN_MODE:
+        for key in PROXY_ENV_KEYS:
+            os.environ.pop(key, None)
+        return
     if use_proxy:
         for key, value in PROXY_ENV_BASE.items():
             if value is None:
@@ -338,6 +354,16 @@ def _init_network_mode() -> Tuple[bool, List[bool]]:
     并返回“允许尝试的 bypass 模式列表”（用于失败时切换重试）。
     """
     host = _tts_host(SERVICE_REGION)
+    if USE_TUN_MODE:
+        direct_ok, direct_detail = _tls_probe(host)
+        if not direct_ok:
+            print(
+                f"⚠️  TUN 模式已启用，脚本不会使用代理；但直连 {host}:443 当前不可用（{direct_detail}）。"
+                "后续若报错，请检查 TUN 路由/系统网络，而不是代理配置。"
+            )
+        _apply_ms_bypass(True)
+        return True, [True]
+
     proxy_url = _effective_proxy_url()
     has_proxy = bool(proxy_url) or _has_proxy_env()
 
