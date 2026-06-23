@@ -36,6 +36,7 @@ import azure.cognitiveservices.speech as speechsdk
 import socket
 import ssl
 import base64
+from html import escape as html_escape
 from urllib.parse import urlparse, unquote
 from typing import List, Optional, Tuple
 
@@ -634,12 +635,13 @@ def split_text(text: str, limit: int = CHUNK_LIMIT):
 def build_ssml(txt: str) -> str:
     """根据当前配置生成 Azure TTS SSML 字符串"""
     role_part = f' role="{ROLE}"' if ROLE else ''
+    escaped_txt = html_escape(txt, quote=False)
     header = (
         f'<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="zh-CN">\n'
         f'  <voice name="{VOICE_NAME}"{role_part}>\n'
         f'    <mstts:express-as style="{VOICE_STYLE}">'  # style
     )
-    prosody = f'<prosody rate="{SPEED}" pitch="{PITCH}">{txt}</prosody>'
+    prosody = f'<prosody rate="{SPEED}" pitch="{PITCH}">{escaped_txt}</prosody>'
     tail = '</mstts:express-as></voice></speak>'
     return header + prosody + tail
 
