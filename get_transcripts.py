@@ -41,6 +41,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 USE_TUN_MODE = os.environ.get("VIDEO_INFO_USE_TUN", "").strip().lower() not in ("", "0", "false", "no")
 PROXY = "http://172.23.240.1:10806"
+YOUTUBE_PROXY = os.environ.get("YOUTUBE_PROXY", PROXY).strip()
 PROXY_ENV_KEYS = ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
 
 # ---- 代理兜底设置 ----
@@ -87,6 +88,23 @@ def get_youtube_cookies_args():
         return ['--cookies', YOUTUBE_COOKIES_PATH]
     return []
 
+
+def get_youtube_proxy_args():
+    """YouTube 在 WSL/TUN 下可能直连不可达，yt-dlp 单独走本机代理。"""
+    if YOUTUBE_PROXY:
+        return ['--proxy', YOUTUBE_PROXY]
+    return []
+
+
+def get_youtube_requests_proxies():
+    """youtube-transcript-api 官方字幕请求专用代理。"""
+    if not YOUTUBE_PROXY:
+        return None
+    return {
+        'http': YOUTUBE_PROXY,
+        'https': YOUTUBE_PROXY,
+    }
+
 def _read_json_bool(obj, key, default=None):
     try:
         val = obj.get(key)
@@ -101,44 +119,14 @@ def _read_json_bool(obj, key, default=None):
     return default
 
 def should_deepseek_use_proxy(default=False):
-    """是否让 DeepSeek 请求走代理。
-    优先级：环境变量 DEEPSEEK_USE_PROXY > config.json: DEEPSEEK_USE_PROXY > default
-    用户当前诉求：DeepSeek 不走代理，因此默认值设为 False。
-    """
-    if USE_TUN_MODE:
-        return False
-
-    # 环境变量优先
-    env_val = os.environ.get("DEEPSEEK_USE_PROXY")
-    if env_val is not None:
-        env_low = env_val.strip().lower()
-        if env_low in ("1", "true", "yes", "on"):
-            return True
-        if env_low in ("0", "false", "no", "off"):
-            return False
-
-    # config.json 次之
-    cfg = 'config.json'
-    if os.path.exists(cfg):
-        try:
-            with open(cfg, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                val = _read_json_bool(data, 'DEEPSEEK_USE_PROXY', default=None)
-                if val is not None:
-                    return val
-        except Exception:
-            pass
-    return default
+    """DeepSeek 固定直连，不读取环境代理或 config.json 的 DEEPSEEK_USE_PROXY。"""
+    return False
 
 def build_deepseek_session():
-    """创建用于访问 DeepSeek 的会话，按配置决定是否走代理。"""
+    """创建用于访问 DeepSeek 的会话。DeepSeek 固定直连。"""
     s = requests.Session()
-    use_proxy = should_deepseek_use_proxy(default=False)
-    # 当不走代理时，忽略环境中的代理设置
-    if not use_proxy:
-        s.trust_env = False
-        s.proxies = {}
-    # 走代理时，沿用环境变量（wrap/代码已设置 HTTP(S)_PROXY）
+    s.trust_env = False
+    s.proxies = {}
     return s
 
 def get_youtube_po_token():
@@ -225,6 +213,7 @@ def get_video_links_from_url(youtube_url, output_dir=None, candidate_size: int =
         # 构造 yt-dlp 命令（列表阶段不强制客户端，避免无谓的 403）
         command = [
             'yt-dlp',
+            *get_youtube_proxy_args(),
             *get_yt_dlp_runtime_args(),
             *get_youtube_cookies_args(),
             '--flat-playlist'
@@ -383,6 +372,7 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         def build_auto_cmd(with_cookies: bool):
             cmd = [
                 'yt-dlp',
+                *get_youtube_proxy_args(),
                 *runtime_args,
                 '-f', YTDLP_AUDIO_FORMAT,
                 '--check-formats',
@@ -532,6 +522,7 @@ def get_video_title(video_url):
         try:
             command = [
                 'yt-dlp',
+                *get_youtube_proxy_args(),
                 *runtime_args,
                 *extra_args,
                 '--print', 'title',
@@ -750,7 +741,11 @@ def main(args):
         
         try:
             # 优先尝试获取官方字幕
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['zh-Hans', 'zh-CN', 'zh', 'en'])
+            transcript_list = YouTubeTranscriptApi.get_transcript(
+                video_id,
+                languages=['zh-Hans', 'zh-CN', 'zh', 'en'],
+                proxies=get_youtube_requests_proxies(),
+            )
             transcript_text = '\n\n'.join([item['text'] for item in transcript_list])
             print(f"成功获取官方文稿。")
 

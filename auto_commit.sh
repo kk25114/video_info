@@ -102,7 +102,8 @@ req = urllib.request.Request(
 )
 
 try:
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=60) as resp:
         result = json.loads(resp.read().decode("utf-8"))
         msg = (result.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
         print(msg)

@@ -70,7 +70,10 @@ def analyze_text_with_deepseek(text: str):
     }
 
     try:
-        response = requests.post(api_url, headers=headers, json=data, timeout=180)
+        session = requests.Session()
+        session.trust_env = False
+        session.proxies = {}
+        response = session.post(api_url, headers=headers, json=data, timeout=180)
         response.raise_for_status()
         content_str = response.json()['choices'][0]['message']['content']
         analysis_data = json.loads(content_str)

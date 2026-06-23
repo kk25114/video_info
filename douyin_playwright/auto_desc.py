@@ -161,14 +161,8 @@ def _call_deepseek(api_key: str, intro: str, topics: str, max_chars: int) -> Tup
     }
 
     session = requests.Session()
-    if USE_TUN_MODE:
-        session.trust_env = False
-        session.proxies = {}
-    else:
-        use_proxy = os.environ.get("DEEPSEEK_USE_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
-        if not use_proxy:
-            session.trust_env = False
-            session.proxies = {}
+    session.trust_env = False
+    session.proxies = {}
 
     resp = session.post(API_URL, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
