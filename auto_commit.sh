@@ -36,15 +36,8 @@ DEEPSEEK_MODEL="deepseek-v4-flash"
 # 进入脚本所在的目录，以确保 git 命令在正确的仓库中执行
 cd "$(dirname "$0")"
 
-# 预处理：读取 .gitignore，停止追踪已被忽略但仍在版本库中的文件
-if [[ -f .gitignore ]]; then
-    IGNORED_TRACKED=$(git ls-files -ci --exclude-from=.gitignore || true)
-    if [[ -n "$IGNORED_TRACKED" ]]; then
-        echo "🔎 检测到已被 .gitignore 忽略但仍受版本控制的文件，准备从暂存区移除追踪："
-        echo "$IGNORED_TRACKED" | sed 's/^/ - /'
-        echo "$IGNORED_TRACKED" | xargs -r git rm -r --cached --
-    fi
-fi
+# 安全约定：.gitignore 只影响未跟踪文件，不能据此自动取消已跟踪文件。
+# 某些项目脚本即使位于被忽略目录，仍需保留在版本库中；git add -A 会正常收集其变更。
 
 # 1. 检查是否有文件需要提交
 if [[ -z $(git status -s) ]]; then
