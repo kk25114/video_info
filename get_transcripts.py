@@ -66,6 +66,11 @@ YTDLP_AUDIO_FORMAT = (
     'best[ext=mp4][protocol=https]/'
     'best'
 )
+# 当前网络代理对 googlevideo.com 的整段请求容易返回 403，分块 Range 请求更稳定。
+# 可通过环境变量覆盖；设为空字符串可关闭分块下载。
+YTDLP_HTTP_CHUNK_SIZE = os.environ.get('YTDLP_HTTP_CHUNK_SIZE', '5M').strip()
+YTDLP_DOWNLOAD_RETRIES = os.environ.get('YTDLP_DOWNLOAD_RETRIES', '10').strip() or '10'
+YTDLP_FRAGMENT_RETRIES = os.environ.get('YTDLP_FRAGMENT_RETRIES', '10').strip() or '10'
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
@@ -94,6 +99,18 @@ def get_youtube_proxy_args():
     if YOUTUBE_PROXY:
         return ['--proxy', YOUTUBE_PROXY]
     return []
+
+
+def get_youtube_download_args():
+    """返回媒体下载的分块与重试参数，降低代理对大请求的 403/中断概率。"""
+    args = [
+        '--retries', YTDLP_DOWNLOAD_RETRIES,
+        '--fragment-retries', YTDLP_FRAGMENT_RETRIES,
+        '--file-access-retries', '3',
+    ]
+    if YTDLP_HTTP_CHUNK_SIZE:
+        args.extend(['--http-chunk-size', YTDLP_HTTP_CHUNK_SIZE])
+    return args
 
 
 def get_youtube_requests_proxies():
@@ -374,8 +391,8 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 'yt-dlp',
                 *get_youtube_proxy_args(),
                 *runtime_args,
+                *get_youtube_download_args(),
                 '-f', YTDLP_AUDIO_FORMAT,
-                '--check-formats',
                 '--no-playlist',
                 '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
                 '--output', audio_path,
@@ -400,8 +417,12 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
                 break
             except subprocess.CalledProcessError as e_try:
                 last_err = e_try
-                # 简要提示后继续尝试下一策略
                 print(f"    -> 下载失败: {desc}")
+                error_text = (e_try.stderr or e_try.stdout or '').strip()
+                if error_text:
+                    # 只打印末尾，保留 HTTP 错误和 traceback，同时避免日志被完整 URL 淹没。
+                    error_tail = '\n'.join(error_text.splitlines()[-6:])
+                    print(f"       错误详情:\n{error_tail}")
         else:
             # 所有策略均失败
             raise last_err if last_err else subprocess.CalledProcessError(1, strategies[-1][1], stderr='all strategies failed')
