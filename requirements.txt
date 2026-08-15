@@ -10,4 +10,4 @@ torch
 torchaudio
 openai-whisper
 opencc-python-reimplemented
-funasr 
+funasr==1.4.2
