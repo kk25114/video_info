@@ -66,6 +66,7 @@ YTDLP_AUDIO_FORMAT = (
     'best[ext=mp4][protocol=https]/'
     'best'
 )
+YTDLP_MWEB_FALLBACK_FORMAT = '18'
 # 当前网络代理对 googlevideo.com 的整段请求容易返回 403，分块 Range 请求更稳定。
 # 可通过环境变量覆盖；设为空字符串可关闭分块下载。
 YTDLP_HTTP_CHUNK_SIZE = os.environ.get('YTDLP_HTTP_CHUNK_SIZE', '5M').strip()
@@ -165,10 +166,42 @@ def get_youtube_po_token():
 
 def build_youtube_extractor_args(client: str = 'tv') -> str:
     """构造 yt-dlp 的 --extractor-args 字符串，自动拼接 po_token（如存在）。"""
+    extractor_args = [f"player_client={client}"]
     token = get_youtube_po_token()
     if token:
-        return f"youtube:player-client={client},po_token={token}"
-    return f"youtube:player-client={client}"
+        extractor_args.append(f"po_token={client}.gvs+{token}")
+    return f"youtube:{';'.join(extractor_args)}"
+
+
+def build_youtube_audio_download_cmd(
+    video_url: str,
+    audio_path: str,
+    runtime_args: list[str],
+    cookies_args: list[str],
+    *,
+    with_cookies: bool = False,
+    player_client: str | None = None,
+    format_selector: str = YTDLP_AUDIO_FORMAT,
+) -> list[str]:
+    """构造音频下载命令，允许为兜底策略指定独立客户端和格式。"""
+    cmd = ['yt-dlp']
+    if with_cookies and cookies_args:
+        cmd.extend(cookies_args)
+    cmd.extend([
+        *get_youtube_proxy_args(),
+        *runtime_args,
+        *get_youtube_download_args(),
+    ])
+    if player_client:
+        cmd.extend(['--extractor-args', build_youtube_extractor_args(player_client)])
+    cmd.extend([
+        '-f', format_selector,
+        '--no-playlist',
+        '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
+        '--output', audio_path,
+        video_url,
+    ])
+    return cmd
 
 
 def check_dependencies():
@@ -386,27 +419,31 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         runtime_args = get_yt_dlp_runtime_args()
         cookies_args = get_youtube_cookies_args()
 
-        def build_auto_cmd(with_cookies: bool):
-            cmd = [
-                'yt-dlp',
-                *get_youtube_proxy_args(),
-                *runtime_args,
-                *get_youtube_download_args(),
-                '-f', YTDLP_AUDIO_FORMAT,
-                '--no-playlist',
-                '-x', '--audio-format', 'mp3', '--audio-quality', '128K',
-                '--output', audio_path,
-                video_url
-            ]
-            if with_cookies and cookies_args:
-                cmd[1:1] = cookies_args
-            return cmd
-
-        # 仅保留两种策略：自适应(不带cookies) -> 自适应(带cookies)
         strategies = [
-            ("自适应(不带cookies)", build_auto_cmd(False)),
-            ("自适应(带cookies)", build_auto_cmd(True)),
+            (
+                "自适应(不带cookies)",
+                build_youtube_audio_download_cmd(
+                    video_url, audio_path, runtime_args, cookies_args,
+                ),
+            ),
         ]
+        if cookies_args:
+            strategies.append((
+                "自适应(带cookies)",
+                build_youtube_audio_download_cmd(
+                    video_url, audio_path, runtime_args, cookies_args,
+                    with_cookies=True,
+                ),
+            ))
+        # 斜杠格式选择器不会在已选格式下载 403 后自动换流，因此需单独执行兜底命令。
+        strategies.append((
+            "兼容流(mweb/18,不带cookies)",
+            build_youtube_audio_download_cmd(
+                video_url, audio_path, runtime_args, cookies_args,
+                player_client='mweb',
+                format_selector=YTDLP_MWEB_FALLBACK_FORMAT,
+            ),
+        ))
 
         last_err = None
         for desc, cmd in strategies:
@@ -484,7 +521,8 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
 
     except subprocess.CalledProcessError as e:
         # 智能判断 yt-dlp 的错误类型
-        error_output = e.stderr.lower()
+        error_detail = (e.stderr or e.stdout or str(e)).strip()
+        error_output = error_detail.lower()
         permanent_error_keywords = [
             'video unavailable', 'private video', 'members-only',
             'this video is private', 'this video is unavailable',
@@ -494,14 +532,14 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         is_permanent = any(keyword in error_output for keyword in permanent_error_keywords)
 
         if is_permanent:
-            print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {e.stderr.strip()}")
+            print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {error_detail}")
             return "permanent_failure" # 返回一个特殊信号
         else:
             # 多策略均失败：给出简要指引
             if '403' in error_output or 'forbidden' in error_output:
-                print("--> [下载403/受限] 平台限制或风控所致。已尝试 带/不带cookies 的自适应下载。")
-                print("    建议：更新 /home/github/video_info/cookies.txt 或稍后重试；必要时更换网络环境。")
-            print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {e.stderr.strip()}")
+                print("--> [下载403/受限] 已尝试自适应流（带/不带cookies）和 mweb/18 兼容流。")
+                print("    建议：更新 yt-dlp 与 cookies.txt；仍失败时配置 YT_PO_TOKEN 或更换网络环境。")
+            print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {error_detail}")
             return None # 返回 None 代表临时失败
 
     except Exception as e:
