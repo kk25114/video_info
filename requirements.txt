@@ -1,6 +1,6 @@
 # 核心依赖
 requests
-youtube-transcript-api
+youtube-transcript-api==1.2.4
 yt-dlp[default]==2026.7.4
 
 # 可选依赖

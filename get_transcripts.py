@@ -38,6 +38,7 @@ import requests
 import subprocess
 import shutil
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import GenericProxyConfig
 
 USE_TUN_MODE = os.environ.get("VIDEO_INFO_USE_TUN", "").strip().lower() not in ("", "0", "false", "no")
 PROXY = "http://172.23.240.1:10806"
@@ -114,14 +115,24 @@ def get_youtube_download_args():
     return args
 
 
-def get_youtube_requests_proxies():
+def get_youtube_proxy_config():
     """youtube-transcript-api 官方字幕请求专用代理。"""
     if not YOUTUBE_PROXY:
         return None
-    return {
-        'http': YOUTUBE_PROXY,
-        'https': YOUTUBE_PROXY,
-    }
+    return GenericProxyConfig(
+        http_url=YOUTUBE_PROXY,
+        https_url=YOUTUBE_PROXY,
+    )
+
+
+def fetch_youtube_transcript_text(video_id):
+    """使用新版 youtube-transcript-api 获取并拼接官方字幕。"""
+    transcript_api = YouTubeTranscriptApi(proxy_config=get_youtube_proxy_config())
+    transcript = transcript_api.fetch(
+        video_id,
+        languages=['zh-Hans', 'zh-CN', 'zh', 'en'],
+    )
+    return '\n\n'.join(item.text for item in transcript)
 
 def _read_json_bool(obj, key, default=None):
     try:
@@ -800,12 +811,7 @@ def main(args):
         
         try:
             # 优先尝试获取官方字幕
-            transcript_list = YouTubeTranscriptApi.get_transcript(
-                video_id,
-                languages=['zh-Hans', 'zh-CN', 'zh', 'en'],
-                proxies=get_youtube_requests_proxies(),
-            )
-            transcript_text = '\n\n'.join([item['text'] for item in transcript_list])
+            transcript_text = fetch_youtube_transcript_text(video_id)
             print(f"成功获取官方文稿。")
 
         except Exception as e:
