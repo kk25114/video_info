@@ -9,6 +9,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from get_transcripts import (  # noqa: E402
     build_youtube_audio_download_cmd,
+    build_youtube_audio_download_strategies,
     build_youtube_extractor_args,
 )
 
@@ -46,6 +47,24 @@ class YoutubeDownloadStrategyTests(unittest.TestCase):
             'youtube:player_client=mweb',
         )
         self.assertNotIn('--cookies', command)
+
+    @patch('get_transcripts.get_youtube_po_token', return_value=None)
+    def test_audio_download_uses_only_mweb_compatibility_strategy(self, _token_mock):
+        strategies = build_youtube_audio_download_strategies(
+            'https://www.youtube.com/watch?v=Sotw8i4nlgU',
+            '/tmp/audio.mp3',
+            [],
+        )
+
+        self.assertEqual(
+            [description for description, _command in strategies],
+            ['兼容流(mweb/18,不带cookies)'],
+        )
+        command = strategies[0][1]
+        format_index = command.index('-f')
+        self.assertEqual(command[format_index + 1], '18')
+        self.assertNotIn('--cookies', command)
+        self.assertNotIn('bestaudio', command)
 
     @patch('get_transcripts.get_youtube_po_token', return_value='token-value')
     def test_po_token_uses_client_and_gvs_scope(self, _token_mock):

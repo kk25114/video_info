@@ -215,6 +215,27 @@ def build_youtube_audio_download_cmd(
     return cmd
 
 
+def build_youtube_audio_download_strategies(
+    video_url: str,
+    audio_path: str,
+    runtime_args: list[str],
+) -> list[tuple[str, list[str]]]:
+    """返回音频下载策略；当前网络环境直接使用 mweb/18 兼容流。"""
+    return [
+        (
+            "兼容流(mweb/18,不带cookies)",
+            build_youtube_audio_download_cmd(
+                video_url,
+                audio_path,
+                runtime_args,
+                [],
+                player_client='mweb',
+                format_selector=YTDLP_MWEB_FALLBACK_FORMAT,
+            ),
+        ),
+    ]
+
+
 def check_dependencies():
     """检查脚本所需的外部命令行工具是否存在。"""
     if not shutil.which('yt-dlp'):
@@ -428,33 +449,11 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
         # 1. 下载音频
         print(f"    1/3: 正在下载音频: {video_url}")
         runtime_args = get_yt_dlp_runtime_args()
-        cookies_args = get_youtube_cookies_args()
-
-        strategies = [
-            (
-                "自适应(不带cookies)",
-                build_youtube_audio_download_cmd(
-                    video_url, audio_path, runtime_args, cookies_args,
-                ),
-            ),
-        ]
-        if cookies_args:
-            strategies.append((
-                "自适应(带cookies)",
-                build_youtube_audio_download_cmd(
-                    video_url, audio_path, runtime_args, cookies_args,
-                    with_cookies=True,
-                ),
-            ))
-        # 斜杠格式选择器不会在已选格式下载 403 后自动换流，因此需单独执行兜底命令。
-        strategies.append((
-            "兼容流(mweb/18,不带cookies)",
-            build_youtube_audio_download_cmd(
-                video_url, audio_path, runtime_args, cookies_args,
-                player_client='mweb',
-                format_selector=YTDLP_MWEB_FALLBACK_FORMAT,
-            ),
-        ))
+        strategies = build_youtube_audio_download_strategies(
+            video_url,
+            audio_path,
+            runtime_args,
+        )
 
         last_err = None
         for desc, cmd in strategies:
@@ -546,10 +545,10 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             print(f"--> [yt-dlp下载失败] 检测到永久性错误，将记录ID。错误: {error_detail}")
             return "permanent_failure" # 返回一个特殊信号
         else:
-            # 多策略均失败：给出简要指引
+            # 下载策略失败：给出简要指引
             if '403' in error_output or 'forbidden' in error_output:
-                print("--> [下载403/受限] 已尝试自适应流（带/不带cookies）和 mweb/18 兼容流。")
-                print("    建议：更新 yt-dlp 与 cookies.txt；仍失败时配置 YT_PO_TOKEN 或更换网络环境。")
+                print("--> [下载403/受限] 已尝试 mweb/18 兼容流（不带cookies）。")
+                print("    建议：配置 YT_PO_TOKEN 或更换网络环境后重试。")
             print(f"--> [yt-dlp下载失败] 检测到临时性错误，将可重试。错误: {error_detail}")
             return None # 返回 None 代表临时失败
 
