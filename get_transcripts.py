@@ -37,6 +37,7 @@ import json
 import requests
 import subprocess
 import shutil
+from pathlib import Path
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api.proxies import GenericProxyConfig
 
@@ -76,6 +77,19 @@ YTDLP_FRAGMENT_RETRIES = os.environ.get('YTDLP_FRAGMENT_RETRIES', '10').strip() 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
+
+# FunASR 模型缓存目录。使用用户目录，避免把运行账号写死为某个用户名。
+FUNASR_MODEL_CACHE_ROOT = Path(
+    os.environ.get(
+        "FUNASR_MODEL_CACHE_ROOT",
+        str(Path.home() / ".cache" / "modelscope" / "hub" / "models" / "iic"),
+    )
+).expanduser()
+FUNASR_MODEL_CACHE_NAMES = {
+    "model": "speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+    "vad_model": "speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "punc_model": "punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+}
 
 
 def get_yt_dlp_runtime_args():
@@ -123,6 +137,38 @@ def get_youtube_proxy_config():
         http_url=YOUTUBE_PROXY,
         https_url=YOUTUBE_PROXY,
     )
+
+
+def get_funasr_model_kwargs(cache_root=None):
+    """优先使用已下载的 FunASR 模型，避免启动时访问 ModelScope 元数据接口。
+
+    FunASR 的 ``disable_update=True`` 只关闭版本检查，使用模型别名时仍可能
+    调用 ModelScope 下载接口。传入包含配置和权重的本地目录，并关闭
+    ``check_latest``，才能在网络不稳定时可靠地离线启动。
+    """
+    root = Path(cache_root).expanduser() if cache_root else FUNASR_MODEL_CACHE_ROOT
+    local_paths = {
+        key: root / directory_name
+        for key, directory_name in FUNASR_MODEL_CACHE_NAMES.items()
+    }
+    cache_complete = all(
+        path.is_dir()
+        and (path / "config.yaml").is_file()
+        and (path / "model.pt").is_file()
+        for path in local_paths.values()
+    )
+    if cache_complete:
+        return {
+            **{key: str(path) for key, path in local_paths.items()},
+            "check_latest": False,
+        }
+
+    # 新机器尚未下载模型时，保留 FunASR 的标准别名和远程下载行为。
+    return {
+        "model": "paraformer-zh",
+        "vad_model": "fsmn-vad",
+        "punc_model": "ct-punc-c",
+    }
 
 
 def fetch_youtube_transcript_text(video_id):
@@ -481,7 +527,15 @@ def transcribe_audio_fallback(video_url, output_dir, base_filename, args):
             if asr_model is None:
                 print(f"    2/3: 首次加载 FunASR 模型 (paraformer-zh)...")
                 from funasr import AutoModel
-                asr_model = AutoModel(model="paraformer-zh", vad_model="fsmn-vad", punc_model="ct-punc-c", disable_update=True)
+                funasr_model_kwargs = get_funasr_model_kwargs()
+                if funasr_model_kwargs.get("check_latest") is False:
+                    print("        检测到本地模型缓存，使用离线模式加载（跳过 ModelScope 检查）。")
+                else:
+                    print("        未找到完整本地缓存，将从 ModelScope 下载模型。")
+                asr_model = AutoModel(
+                    **funasr_model_kwargs,
+                    disable_update=True,
+                )
             
             print("        正在进行语音识别，这可能需要一些时间...")
             result = asr_model.generate(input=audio_path)
