@@ -1,0 +1,34 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/nLyNfTbbAxQ/下载视频/nLyNfTbbAxQ.mp4",
+  "sample_fps": 4.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 3130,
+  "images": [
+    {
+      "file": "001_03m32s_6.9s.png",
+      "start_seconds": 212.867,
+      "end_seconds": 219.733,
+      "duration_seconds": 6.867,
+      "samples": 8,
+      "analysis_box": [
+        69,
+        40,
+        431,
+        229
+      ]
+    },
+    {
+      "file": "002_03m41s_13.0s.png",
+      "start_seconds": 221.667,
+      "end_seconds": 234.667,
+      "duration_seconds": 13.0,
+      "samples": 31,
+      "analysis_box": [
+        69,
+        39,
+        460,
+        230
+      ]
+    }
+  ]
+}
