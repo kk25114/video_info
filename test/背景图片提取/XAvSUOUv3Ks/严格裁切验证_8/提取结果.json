@@ -1,0 +1,24 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/XAvSUOUv3Ks/URL全片验证_1/下载视频/XAvSUOUv3Ks.mp4",
+  "mode": "timestamp_review",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "search_seconds": 12.0,
+  "images": [
+    {
+      "file": "001_07m19s.png",
+      "requested_seconds": 439.0,
+      "first_confirmed_seconds": 434.0,
+      "last_confirmed_seconds": 451.0,
+      "confirmed_duration_seconds": 17.5,
+      "samples": 35,
+      "analysis_box": [
+        47,
+        54,
+        544,
+        191
+      ],
+      "source_frame_seconds": 439.0
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "source_video": "test/背景图片提取/g8QNCJceC7Q/全片验证_1/下载视频/g8QNCJceC7Q.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1548,
+  "images": []
+}

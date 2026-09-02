@@ -1,0 +1,24 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/k93oVykHWJ4/09m14s验证_1/下载视频/k93oVykHWJ4.mp4",
+  "mode": "timestamp_review",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "search_seconds": 12.0,
+  "images": [
+    {
+      "file": "001_09m14s.png",
+      "requested_seconds": 554.0,
+      "first_confirmed_seconds": 549.0,
+      "last_confirmed_seconds": 561.0,
+      "confirmed_duration_seconds": 12.5,
+      "samples": 25,
+      "analysis_box": [
+        231,
+        21,
+        178,
+        253
+      ],
+      "source_frame_seconds": 554.0
+    }
+  ]
+}

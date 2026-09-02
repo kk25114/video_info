@@ -1,0 +1,86 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/XAvSUOUv3Ks/URL全片验证_1/下载视频/XAvSUOUv3Ks.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1677,
+  "images": [
+    {
+      "file": "001_01m04s_9.5s.png",
+      "start_seconds": 64.0,
+      "end_seconds": 73.5,
+      "duration_seconds": 9.5,
+      "samples": 14,
+      "analysis_box": [
+        116,
+        60,
+        405,
+        172
+      ]
+    },
+    {
+      "file": "002_03m58s_47.5s.png",
+      "start_seconds": 238.5,
+      "end_seconds": 286.0,
+      "duration_seconds": 47.5,
+      "samples": 90,
+      "analysis_box": [
+        106,
+        56,
+        422,
+        208
+      ]
+    },
+    {
+      "file": "003_06m38s_82.5s.png",
+      "start_seconds": 398.0,
+      "end_seconds": 480.5,
+      "duration_seconds": 82.5,
+      "samples": 146,
+      "analysis_box": [
+        47,
+        51,
+        544,
+        197
+      ]
+    },
+    {
+      "file": "004_07m27s_10.5s.png",
+      "start_seconds": 447.5,
+      "end_seconds": 458.0,
+      "duration_seconds": 10.5,
+      "samples": 14,
+      "analysis_box": [
+        321,
+        34,
+        141,
+        255
+      ]
+    },
+    {
+      "file": "005_10m07s_5.5s.png",
+      "start_seconds": 607.5,
+      "end_seconds": 613.0,
+      "duration_seconds": 5.5,
+      "samples": 2,
+      "analysis_box": [
+        73,
+        104,
+        87,
+        96
+      ]
+    },
+    {
+      "file": "006_12m21s_14.0s.png",
+      "start_seconds": 741.5,
+      "end_seconds": 755.5,
+      "duration_seconds": 14.0,
+      "samples": 23,
+      "analysis_box": [
+        103,
+        18,
+        423,
+        250
+      ]
+    }
+  ]
+}

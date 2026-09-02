@@ -1,0 +1,99 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/nLyNfTbbAxQ/下载视频/nLyNfTbbAxQ.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1669,
+  "images": [
+    {
+      "file": "001_00m50s_6.5s.png",
+      "start_seconds": 50.0,
+      "end_seconds": 56.5,
+      "duration_seconds": 6.5,
+      "samples": 7,
+      "analysis_box": [
+        66,
+        80,
+        497,
+        200
+      ]
+    },
+    {
+      "file": "002_01m00s_6.0s.png",
+      "start_seconds": 60.0,
+      "end_seconds": 66.0,
+      "duration_seconds": 6.0,
+      "samples": 2,
+      "analysis_box": [
+        25,
+        164,
+        394,
+        110
+      ]
+    },
+    {
+      "file": "003_00m57s_55.5s.png",
+      "start_seconds": 57.5,
+      "end_seconds": 113.0,
+      "duration_seconds": 55.5,
+      "samples": 82,
+      "analysis_box": [
+        273,
+        10,
+        146,
+        268
+      ]
+    },
+    {
+      "file": "004_01m41s_14.5s.png",
+      "start_seconds": 101.5,
+      "end_seconds": 116.0,
+      "duration_seconds": 14.5,
+      "samples": 10,
+      "analysis_box": [
+        51,
+        54,
+        368,
+        236
+      ]
+    },
+    {
+      "file": "005_03m52s_7.5s.png",
+      "start_seconds": 232.5,
+      "end_seconds": 240.0,
+      "duration_seconds": 7.5,
+      "samples": 4,
+      "analysis_box": [
+        130,
+        38,
+        367,
+        280
+      ]
+    },
+    {
+      "file": "006_04m05s_6.5s.png",
+      "start_seconds": 245.0,
+      "end_seconds": 251.5,
+      "duration_seconds": 6.5,
+      "samples": 3,
+      "analysis_box": [
+        142,
+        40,
+        490,
+        281
+      ]
+    },
+    {
+      "file": "007_03m30s_46.5s.png",
+      "start_seconds": 210.5,
+      "end_seconds": 257.0,
+      "duration_seconds": 46.5,
+      "samples": 79,
+      "analysis_box": [
+        138,
+        39,
+        359,
+        230
+      ]
+    }
+  ]
+}

@@ -124,6 +124,22 @@ class StaticBackgroundImageExtractorTests(unittest.TestCase):
         self.assertLessEqual(cropped.shape[1], 205)
         self.assertEqual(cropped.shape[0], 150)
 
+    def test_trims_sustained_unstable_bottom_from_candidate_box(self):
+        stable_mask = np.ones((100, 120), dtype=np.uint8)
+        stable_mask[80:, :] = 0
+
+        trimmed = MODULE.trim_unstable_bottom_edge((10, 10, 80, 85), stable_mask)
+
+        # 在稳定区结束前留一行安全余量，避免字幕边界的抗锯齿像素被带出。
+        self.assertEqual(trimmed, (10, 10, 80, 69))
+
+    def test_keeps_box_when_bottom_is_only_briefly_unstable(self):
+        stable_mask = np.ones((100, 120), dtype=np.uint8)
+        stable_mask[80:82, :] = 0
+
+        box = (10, 10, 80, 85)
+        self.assertEqual(MODULE.trim_unstable_bottom_edge(box, stable_mask), box)
+
     def test_brief_detection_gap_does_not_split_one_static_picture(self):
         # 同一图片的候选框在一段极短的检测空窗后重新出现，应仍合并为一份素材。
         track = MODULE.Track(
@@ -135,6 +151,89 @@ class StaticBackgroundImageExtractorTests(unittest.TestCase):
             last_seen_index=20,
         )
         self.assertLessEqual(23 - track.last_seen_index, round(2.0 * 3.0))
+
+    def test_track_keeps_complete_box_after_partial_candidate(self):
+        complete = np.full((120, 240, 3), 120, dtype=np.uint8)
+        partial = np.full((120, 80, 3), 220, dtype=np.uint8)
+        track = MODULE.Track(
+            box=(40, 20, 240, 120),
+            start_time=1.0,
+            last_time=5.0,
+            best_frame=complete,
+            best_sharpness=20.0,
+            last_seen_index=10,
+            last_signature=MODULE.image_hash(complete),
+            detector="card",
+        )
+        track.update(
+            MODULE.Candidate(
+                (200, 20, 80, 120),
+                partial,
+                5.5,
+                999.0,
+                signature=MODULE.image_hash(partial),
+                detector="card",
+            ),
+            11,
+        )
+        self.assertEqual(track.box, (40, 20, 240, 120))
+        self.assertEqual(track.best_frame.shape, complete.shape)
+
+    def test_partial_box_matches_complete_box_but_adjacent_map_does_not(self):
+        complete = np.full((120, 240, 3), 120, dtype=np.uint8)
+        complete_hash = MODULE.image_hash(complete)
+        partial = MODULE.Candidate(
+            (200, 20, 80, 120),
+            np.full((120, 80, 3), 220, dtype=np.uint8),
+            5.0,
+            20.0,
+            signature=np.logical_not(complete_hash),
+            detector="card",
+        )
+        track = MODULE.Track(
+            box=(40, 20, 240, 120),
+            start_time=1.0,
+            last_time=4.0,
+            best_frame=complete,
+            best_sharpness=20.0,
+            last_signature=complete_hash,
+            detector="card",
+        )
+        self.assertTrue(MODULE.candidate_matches_track(track, partial))
+
+        adjacent_map = MODULE.Candidate(
+            (120, 10, 130, 130),
+            np.full((130, 130, 3), 80, dtype=np.uint8),
+            6.0,
+            20.0,
+            signature=np.logical_not(complete_hash),
+            detector="card",
+        )
+        self.assertFalse(MODULE.candidate_matches_track(track, adjacent_map))
+
+    def test_merges_overlapping_partial_track_with_complete_track(self):
+        complete = MODULE.Track(
+            box=(47, 51, 544, 197),
+            start_time=10.0,
+            last_time=30.0,
+            best_frame=np.full((197, 544, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+        partial = MODULE.Track(
+            box=(321, 34, 141, 255),
+            start_time=20.0,
+            last_time=24.0,
+            best_frame=np.full((255, 141, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+
+        self.assertTrue(MODULE.tracks_can_merge(complete, partial))
+        merged = MODULE.merge_tracks([complete, partial])
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].box, complete.box)
 
 
 if __name__ == "__main__":

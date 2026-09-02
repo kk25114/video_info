@@ -1,0 +1,125 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/nLyNfTbbAxQ/下载视频/nLyNfTbbAxQ.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1669,
+  "images": [
+    {
+      "file": "001_00m50s_6.5s.png",
+      "start_seconds": 50.0,
+      "end_seconds": 56.5,
+      "duration_seconds": 6.5,
+      "samples": 7,
+      "analysis_box": [
+        66,
+        80,
+        497,
+        200
+      ]
+    },
+    {
+      "file": "002_01m00s_6.0s.png",
+      "start_seconds": 60.0,
+      "end_seconds": 66.0,
+      "duration_seconds": 6.0,
+      "samples": 2,
+      "analysis_box": [
+        25,
+        164,
+        394,
+        110
+      ]
+    },
+    {
+      "file": "003_00m57s_55.5s.png",
+      "start_seconds": 57.5,
+      "end_seconds": 113.0,
+      "duration_seconds": 55.5,
+      "samples": 82,
+      "analysis_box": [
+        273,
+        10,
+        146,
+        268
+      ]
+    },
+    {
+      "file": "004_01m47s_7.0s.png",
+      "start_seconds": 107.0,
+      "end_seconds": 114.0,
+      "duration_seconds": 7.0,
+      "samples": 6,
+      "analysis_box": [
+        220,
+        9,
+        199,
+        283
+      ]
+    },
+    {
+      "file": "005_03m53s_5.5s.png",
+      "start_seconds": 233.0,
+      "end_seconds": 238.5,
+      "duration_seconds": 5.5,
+      "samples": 2,
+      "analysis_box": [
+        69,
+        40,
+        441,
+        229
+      ]
+    },
+    {
+      "file": "006_03m54s_5.5s.png",
+      "start_seconds": 234.0,
+      "end_seconds": 239.5,
+      "duration_seconds": 5.5,
+      "samples": 2,
+      "analysis_box": [
+        142,
+        38,
+        166,
+        239
+      ]
+    },
+    {
+      "file": "007_03m57s_5.0s.png",
+      "start_seconds": 237.5,
+      "end_seconds": 242.5,
+      "duration_seconds": 5.0,
+      "samples": 1,
+      "analysis_box": [
+        69,
+        40,
+        441,
+        229
+      ]
+    },
+    {
+      "file": "008_04m05s_6.5s.png",
+      "start_seconds": 245.0,
+      "end_seconds": 251.5,
+      "duration_seconds": 6.5,
+      "samples": 3,
+      "analysis_box": [
+        142,
+        40,
+        490,
+        281
+      ]
+    },
+    {
+      "file": "009_03m30s_46.5s.png",
+      "start_seconds": 210.5,
+      "end_seconds": 257.0,
+      "duration_seconds": 46.5,
+      "samples": 77,
+      "analysis_box": [
+        138,
+        39,
+        359,
+        230
+      ]
+    }
+  ]
+}

@@ -1,0 +1,320 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/k93oVykHWJ4/09m14s验证_1/下载视频/k93oVykHWJ4.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1574,
+  "images": [
+    {
+      "file": "001_00m03s_23.5s.png",
+      "start_seconds": 3.0,
+      "end_seconds": 26.5,
+      "duration_seconds": 23.5,
+      "samples": 42,
+      "analysis_box": [
+        106,
+        71,
+        416,
+        202
+      ]
+    },
+    {
+      "file": "002_00m49s_5.5s.png",
+      "start_seconds": 49.5,
+      "end_seconds": 55.0,
+      "duration_seconds": 5.5,
+      "samples": 4,
+      "analysis_box": [
+        402,
+        36,
+        112,
+        241
+      ]
+    },
+    {
+      "file": "003_00m53s_6.5s.png",
+      "start_seconds": 53.5,
+      "end_seconds": 60.0,
+      "duration_seconds": 6.5,
+      "samples": 5,
+      "analysis_box": [
+        124,
+        39,
+        393,
+        238
+      ]
+    },
+    {
+      "file": "004_00m52s_8.0s.png",
+      "start_seconds": 52.5,
+      "end_seconds": 60.5,
+      "duration_seconds": 8.0,
+      "samples": 4,
+      "analysis_box": [
+        381,
+        39,
+        133,
+        237
+      ]
+    },
+    {
+      "file": "005_01m00s_6.5s.png",
+      "start_seconds": 60.5,
+      "end_seconds": 67.0,
+      "duration_seconds": 6.5,
+      "samples": 2,
+      "analysis_box": [
+        200,
+        43,
+        108,
+        232
+      ]
+    },
+    {
+      "file": "006_00m59s_9.5s.png",
+      "start_seconds": 59.5,
+      "end_seconds": 69.0,
+      "duration_seconds": 9.5,
+      "samples": 7,
+      "analysis_box": [
+        178,
+        43,
+        117,
+        232
+      ]
+    },
+    {
+      "file": "007_01m01s_11.0s.png",
+      "start_seconds": 61.5,
+      "end_seconds": 72.5,
+      "duration_seconds": 11.0,
+      "samples": 6,
+      "analysis_box": [
+        116,
+        88,
+        398,
+        189
+      ]
+    },
+    {
+      "file": "008_01m07s_11.5s.png",
+      "start_seconds": 67.5,
+      "end_seconds": 79.0,
+      "duration_seconds": 11.5,
+      "samples": 16,
+      "analysis_box": [
+        222,
+        88,
+        108,
+        191
+      ]
+    },
+    {
+      "file": "009_01m18s_9.0s.png",
+      "start_seconds": 78.0,
+      "end_seconds": 87.0,
+      "duration_seconds": 9.0,
+      "samples": 11,
+      "analysis_box": [
+        299,
+        43,
+        214,
+        233
+      ]
+    },
+    {
+      "file": "010_01m22s_7.0s.png",
+      "start_seconds": 82.5,
+      "end_seconds": 89.5,
+      "duration_seconds": 7.0,
+      "samples": 4,
+      "analysis_box": [
+        243,
+        43,
+        187,
+        233
+      ]
+    },
+    {
+      "file": "011_01m33s_11.5s.png",
+      "start_seconds": 93.5,
+      "end_seconds": 105.0,
+      "duration_seconds": 11.5,
+      "samples": 10,
+      "analysis_box": [
+        116,
+        88,
+        398,
+        189
+      ]
+    },
+    {
+      "file": "012_08m42s_5.0s.png",
+      "start_seconds": 522.5,
+      "end_seconds": 527.5,
+      "duration_seconds": 5.0,
+      "samples": 3,
+      "analysis_box": [
+        232,
+        90,
+        77,
+        185
+      ]
+    },
+    {
+      "file": "013_08m50s_7.5s.png",
+      "start_seconds": 530.0,
+      "end_seconds": 537.5,
+      "duration_seconds": 7.5,
+      "samples": 3,
+      "analysis_box": [
+        318,
+        21,
+        75,
+        254
+      ]
+    },
+    {
+      "file": "014_08m41s_42.5s.png",
+      "start_seconds": 521.5,
+      "end_seconds": 564.0,
+      "duration_seconds": 42.5,
+      "samples": 71,
+      "analysis_box": [
+        232,
+        21,
+        102,
+        253
+      ]
+    },
+    {
+      "file": "015_09m25s_5.0s.png",
+      "start_seconds": 565.5,
+      "end_seconds": 570.5,
+      "duration_seconds": 5.0,
+      "samples": 2,
+      "analysis_box": [
+        311,
+        21,
+        78,
+        255
+      ]
+    },
+    {
+      "file": "016_09m21s_18.0s.png",
+      "start_seconds": 561.5,
+      "end_seconds": 579.5,
+      "duration_seconds": 18.0,
+      "samples": 28,
+      "analysis_box": [
+        297,
+        21,
+        110,
+        253
+      ]
+    },
+    {
+      "file": "017_09m37s_22.5s.png",
+      "start_seconds": 577.0,
+      "end_seconds": 599.5,
+      "duration_seconds": 22.5,
+      "samples": 34,
+      "analysis_box": [
+        230,
+        90,
+        133,
+        187
+      ]
+    },
+    {
+      "file": "018_09m56s_11.5s.png",
+      "start_seconds": 596.0,
+      "end_seconds": 607.5,
+      "duration_seconds": 11.5,
+      "samples": 13,
+      "analysis_box": [
+        231,
+        122,
+        178,
+        154
+      ]
+    },
+    {
+      "file": "019_10m20s_5.5s.png",
+      "start_seconds": 620.0,
+      "end_seconds": 625.5,
+      "duration_seconds": 5.5,
+      "samples": 5,
+      "analysis_box": [
+        291,
+        21,
+        78,
+        253
+      ]
+    },
+    {
+      "file": "020_10m54s_6.5s.png",
+      "start_seconds": 654.0,
+      "end_seconds": 660.5,
+      "duration_seconds": 6.5,
+      "samples": 5,
+      "analysis_box": [
+        321,
+        48,
+        108,
+        219
+      ]
+    },
+    {
+      "file": "021_10m41s_27.0s.png",
+      "start_seconds": 641.5,
+      "end_seconds": 668.5,
+      "duration_seconds": 27.0,
+      "samples": 39,
+      "analysis_box": [
+        157,
+        48,
+        328,
+        219
+      ]
+    },
+    {
+      "file": "022_11m11s_9.0s.png",
+      "start_seconds": 671.0,
+      "end_seconds": 680.0,
+      "duration_seconds": 9.0,
+      "samples": 7,
+      "analysis_box": [
+        313,
+        30,
+        104,
+        245
+      ]
+    },
+    {
+      "file": "023_11m10s_27.0s.png",
+      "start_seconds": 670.0,
+      "end_seconds": 697.0,
+      "duration_seconds": 27.0,
+      "samples": 25,
+      "analysis_box": [
+        249,
+        29,
+        154,
+        246
+      ]
+    },
+    {
+      "file": "024_11m45s_5.0s.png",
+      "start_seconds": 705.0,
+      "end_seconds": 710.0,
+      "duration_seconds": 5.0,
+      "samples": 5,
+      "analysis_box": [
+        308,
+        29,
+        109,
+        248
+      ]
+    }
+  ]
+}

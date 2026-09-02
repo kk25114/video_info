@@ -1,0 +1,73 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/k93oVykHWJ4/09m14s验证_1/下载视频/k93oVykHWJ4.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1574,
+  "images": [
+    {
+      "file": "001_00m03s_24.0s.png",
+      "start_seconds": 3.0,
+      "end_seconds": 27.0,
+      "duration_seconds": 24.0,
+      "samples": 43,
+      "analysis_box": [
+        106,
+        72,
+        413,
+        206
+      ]
+    },
+    {
+      "file": "002_00m49s_55.5s.png",
+      "start_seconds": 49.5,
+      "end_seconds": 105.0,
+      "duration_seconds": 55.5,
+      "samples": 106,
+      "analysis_box": [
+        124,
+        40,
+        396,
+        237
+      ]
+    },
+    {
+      "file": "003_08m40s_118.5s.png",
+      "start_seconds": 520.0,
+      "end_seconds": 638.5,
+      "duration_seconds": 118.5,
+      "samples": 228,
+      "analysis_box": [
+        231,
+        21,
+        183,
+        254
+      ]
+    },
+    {
+      "file": "004_10m41s_27.5s.png",
+      "start_seconds": 641.5,
+      "end_seconds": 669.0,
+      "duration_seconds": 27.5,
+      "samples": 50,
+      "analysis_box": [
+        156,
+        45,
+        326,
+        223
+      ]
+    },
+    {
+      "file": "005_11m10s_46.0s.png",
+      "start_seconds": 670.0,
+      "end_seconds": 716.0,
+      "duration_seconds": 46.0,
+      "samples": 64,
+      "analysis_box": [
+        222,
+        29,
+        197,
+        247
+      ]
+    }
+  ]
+}
