@@ -50,6 +50,7 @@ mk_video/**/*.srt
 mk_video/**/*.wav
 mk_video/images/*
 mk_video/videos/*
+mk_video/latest_video_images.json
 **/temp_audio_*.mp3
 **/temp_audio_*
 **/*.ytdl

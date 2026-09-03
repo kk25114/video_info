@@ -1,7 +1,7 @@
 # 核心依赖
 requests
 youtube-transcript-api==1.2.4
-yt-dlp[default]==2026.7.4
+yt-dlp[default]==2026.8.19
 
 # 可选依赖
 # 如果需要使用 ASR 备用方案，请根据您的需要安装:

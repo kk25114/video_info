@@ -1,0 +1,70 @@
+{
+  "source_video": "test/背景图片提取/O1B5VTCJNVE/高清验证_2/下载视频/O1B5VTCJNVE.mp4",
+  "source_resolution": [
+    640,
+    360
+  ],
+  "mode": "timestamp_review",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "search_seconds": 15.0,
+  "images": [
+    {
+      "file": "001_02m12s.png",
+      "image_resolution": [
+        290,
+        241
+      ],
+      "requested_seconds": 132.0,
+      "first_confirmed_seconds": 131.5,
+      "last_confirmed_seconds": 147.0,
+      "confirmed_duration_seconds": 16.0,
+      "samples": 26,
+      "analysis_box": [
+        174,
+        28,
+        290,
+        241
+      ],
+      "source_frame_seconds": 132.0
+    },
+    {
+      "file": "002_10m00s.png",
+      "image_resolution": [
+        201,
+        254
+      ],
+      "requested_seconds": 600.0,
+      "first_confirmed_seconds": 595.0,
+      "last_confirmed_seconds": 615.0,
+      "confirmed_duration_seconds": 20.5,
+      "samples": 33,
+      "analysis_box": [
+        220,
+        14,
+        201,
+        254
+      ],
+      "source_frame_seconds": 600.0
+    },
+    {
+      "file": "003_10m40s.png",
+      "image_resolution": [
+        206,
+        177
+      ],
+      "requested_seconds": 640.0,
+      "first_confirmed_seconds": 635.0,
+      "last_confirmed_seconds": 642.5,
+      "confirmed_duration_seconds": 8.0,
+      "samples": 7,
+      "analysis_box": [
+        131,
+        21,
+        291,
+        179
+      ],
+      "source_frame_seconds": 640.0
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/O1B5VTCJNVE/全片验证_1/下载视频/O1B5VTCJNVE.mp4",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1601,
+  "images": [
+    {
+      "file": "001_02m11s_186.5s.png",
+      "start_seconds": 131.5,
+      "end_seconds": 318.0,
+      "duration_seconds": 186.5,
+      "samples": 367,
+      "analysis_box": [
+        174,
+        32,
+        296,
+        237
+      ]
+    },
+    {
+      "file": "002_09m55s_31.5s.png",
+      "start_seconds": 595.0,
+      "end_seconds": 626.5,
+      "duration_seconds": 31.5,
+      "samples": 56,
+      "analysis_box": [
+        70,
+        14,
+        544,
+        186
+      ]
+    },
+    {
+      "file": "003_10m33s_25.0s.png",
+      "start_seconds": 633.5,
+      "end_seconds": 658.5,
+      "duration_seconds": 25.0,
+      "samples": 29,
+      "analysis_box": [
+        71,
+        10,
+        390,
+        277
+      ]
+    }
+  ]
+}

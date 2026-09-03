@@ -65,6 +65,13 @@ class StaticBackgroundImageExtractorTests(unittest.TestCase):
             self.assertTrue((output_dir / images[0]["file"]).is_file())
             self.assertTrue((output_dir / "提取结果.json").is_file())
 
+    def test_probes_source_resolution_without_analysis_resize(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            video_path = Path(temp_dir) / "sample.avi"
+            self._create_video(video_path)
+
+            self.assertEqual(MODULE.probe_video_resolution(video_path), (320, 180))
+
     def test_does_not_treat_a_fully_static_video_as_background_image(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -98,6 +105,21 @@ class StaticBackgroundImageExtractorTests(unittest.TestCase):
         self.assertLess(cropped.shape[1], 190)
         self.assertGreaterEqual(cropped.shape[0], 120)
         self.assertLess(cropped.shape[0], 150)
+
+    def test_trims_embedded_card_when_vertical_edges_touch_candidate(self):
+        # 视频候选框有时刚好截满文档上下端，但左右仍包含动态背景和水印。
+        image = np.full((180, 320, 3), (30, 90, 30), dtype=np.uint8)
+        image[:, 80:240] = (255, 255, 255)
+        cv2.putText(image, "报告", (110, 55), cv2.FONT_HERSHEY_SIMPLEX, 1, (50, 50, 50), 2)
+        image[135:175, 10:65] = (255, 255, 255)
+
+        cropped = MODULE.trim_embedded_light_card(image)
+
+        self.assertGreaterEqual(cropped.shape[1], 150)
+        self.assertLess(cropped.shape[1], 180)
+        self.assertGreaterEqual(cropped.shape[0], 175)
+        self.assertLessEqual(cropped.shape[0], 180)
+        self.assertEqual(MODULE.trim_embedded_light_card(np.full_like(image, 255)).shape, image.shape)
 
     def test_trims_card_using_straight_border_lines(self):
         image = np.full((200, 340, 3), (230, 150, 40), dtype=np.uint8)
@@ -234,6 +256,49 @@ class StaticBackgroundImageExtractorTests(unittest.TestCase):
 
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].box, complete.box)
+
+    def test_merges_adjacent_partial_track_with_complete_track(self):
+        # 稳定检测在一个采样间隔内短暂丢失时，同一张图的小框和完整框仍应合并。
+        complete = MODULE.Track(
+            box=(70, 10, 390, 277),
+            start_time=10.0,
+            last_time=30.0,
+            best_frame=np.full((277, 390, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+        partial = MODULE.Track(
+            box=(116, 21, 306, 179),
+            start_time=30.5,
+            last_time=34.0,
+            best_frame=np.full((179, 306, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+
+        self.assertTrue(MODULE.tracks_can_merge(complete, partial))
+
+    def test_merges_adjacent_same_region_tracks_with_small_box_drift(self):
+        # 同一张文档从近似完整框恢复到轻微偏移的完整框时，边界变化不应
+        # 让一个素材被拆成两份。
+        first = MODULE.Track(
+            box=(131, 21, 291, 179),
+            start_time=10.0,
+            last_time=20.0,
+            best_frame=np.full((179, 291, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+        second = MODULE.Track(
+            box=(177, 24, 244, 238),
+            start_time=20.5,
+            last_time=30.0,
+            best_frame=np.full((238, 244, 3), 120, dtype=np.uint8),
+            best_sharpness=20.0,
+            detector="card",
+        )
+
+        self.assertTrue(MODULE.tracks_can_merge(first, second))
 
 
 if __name__ == "__main__":

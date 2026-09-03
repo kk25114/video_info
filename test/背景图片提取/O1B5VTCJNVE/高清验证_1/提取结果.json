@@ -1,0 +1,32 @@
+{
+  "source_video": "test/背景图片提取/O1B5VTCJNVE/高清验证_1/下载视频/O1B5VTCJNVE.mp4",
+  "source_resolution": [
+    1920,
+    1080
+  ],
+  "mode": "timestamp_review",
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "search_seconds": 12.0,
+  "images": [
+    {
+      "file": "001_02m12s.png",
+      "image_resolution": [
+        864,
+        704
+      ],
+      "requested_seconds": 132.0,
+      "first_confirmed_seconds": 131.5,
+      "last_confirmed_seconds": 144.0,
+      "confirmed_duration_seconds": 13.0,
+      "samples": 20,
+      "analysis_box": [
+        264,
+        49,
+        432,
+        352
+      ],
+      "source_frame_seconds": 132.0
+    }
+  ]
+}

@@ -38,11 +38,15 @@ DEFAULT_MIN_BACKGROUND_MOTION = 0.03
 DEFAULT_ANALYSIS_WIDTH = 960
 DEFAULT_EDGE_MARGIN_RATIO = 0.04
 DEFAULT_MOTION_WINDOW_SECONDS = 3.0
+# 竖版候选面积过小时，通常是建筑立柱、片尾装饰或播放器控件，而不是
+# 需要提取的独立图片。卡片分支已有更严格的面积门槛，这里单独约束竖版。
+DEFAULT_PORTRAIT_MIN_AREA_RATIO = 0.10
 # 白底图表、文章截图等卡片通常至少占画面的约 12%。这个分支用于
 # 处理视频编码导致前景图片存在轻微像素波动的情况。
 DEFAULT_CARD_MIN_AREA_RATIO = 0.12
 DEFAULT_CARD_LIGHT_RATIO = 0.55
 DEFAULT_CARD_CENTER_TOLERANCE = 0.16
+DEFAULT_YOUTUBE_COOKIES_PATH = Path(__file__).resolve().parents[1] / "cookies.txt"
 
 
 @dataclass
@@ -135,15 +139,95 @@ def get_js_runtime_args() -> list[str]:
     return []
 
 
+def get_youtube_cookies_args() -> list[str]:
+    """优先使用环境变量指定的 cookies，否则使用项目根目录的 cookies.txt。"""
+    configured_path = os.environ.get("YOUTUBE_COOKIES")
+    cookies_path = Path(configured_path).expanduser() if configured_path else DEFAULT_YOUTUBE_COOKIES_PATH
+    if cookies_path.is_file():
+        return ["--cookies", str(cookies_path)]
+    return []
+
+
+def probe_video_resolution(video_path: Path) -> tuple[int, int] | None:
+    """读取视频第一路画面的真实宽高，读取失败时返回 None。"""
+    if shutil.which("ffprobe"):
+        command = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            str(video_path),
+        ]
+        try:
+            result = subprocess.run(command, text=True, capture_output=True, check=False)
+        except OSError:
+            result = None
+        if result and result.returncode == 0:
+            values = result.stdout.strip().split("x")
+            if len(values) == 2:
+                try:
+                    width, height = (int(value) for value in values)
+                except ValueError:
+                    pass
+                else:
+                    if width > 0 and height > 0:
+                        return width, height
+
+    capture = cv2.VideoCapture(str(video_path))
+    try:
+        width = round(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    finally:
+        capture.release()
+    if width > 0 and height > 0:
+        return width, height
+    return None
+
+
+def _downloaded_file_sort_key(video_path: Path) -> tuple[int, int]:
+    """按像素总数、再按更新时间排序下载结果。"""
+    resolution = probe_video_resolution(video_path)
+    pixel_count = resolution[0] * resolution[1] if resolution else 0
+    return pixel_count, video_path.stat().st_mtime_ns
+
+
+def _yt_dlp_environment() -> dict[str, str]:
+    """给 yt-dlp 清理当前用户无法访问的 PATH 条目。"""
+    environment = os.environ.copy()
+    path_value = environment.get("PATH")
+    if path_value:
+        accessible_paths = [
+            path
+            for path in path_value.split(os.pathsep)
+            if path and os.path.isdir(path) and os.access(path, os.X_OK)
+        ]
+        environment["PATH"] = os.pathsep.join(accessible_paths)
+    return environment
+
+
 def download_youtube_video(url: str, output_dir: Path, proxy: str | None, max_height: int) -> Path:
-    """下载用于分析的视频流，依次尝试 Web、Android VR、mweb 客户端。"""
+    """下载用于分析的视频流，优先高质量客户端并核实最终分辨率。"""
     if not shutil.which("yt-dlp"):
         raise RuntimeError("未找到 yt-dlp，无法下载 YouTube 视频。")
 
     download_dir = output_dir / "下载视频"
     download_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(download_dir / "%(id)s.%(ext)s")
-    format_selector = f"bestvideo[height<={max_height}][ext=mp4]/best[height<={max_height}]"
+    # 图片像素取决于下载到的原始视频分辨率。先选 H.264 独立视频流：同样是
+    # 1080p 时，H.264 在 WSL/OpenCV 上比 AV1 更稳定；只有没有 H.264 时才
+    # 退回其他独立流和合并音视频格式。
+    format_selector = (
+        f"bestvideo[height<={max_height}][ext=mp4][vcodec^=avc1]/"
+        f"bestvideo[height<={max_height}][vcodec^=avc1]/"
+        f"bestvideo[height<={max_height}][ext=mp4]/"
+        f"bestvideo[height<={max_height}]/"
+        f"best[height<={max_height}]"
+    )
     shared_args = [
         "yt-dlp",
         "--no-playlist",
@@ -157,15 +241,40 @@ def download_youtube_video(url: str, output_dir: Path, proxy: str | None, max_he
         "--http-chunk-size",
         "5M",
         *get_js_runtime_args(),
+        *get_youtube_cookies_args(),
     ]
     if proxy:
         shared_args.extend(["--proxy", proxy])
 
-    attempts = ("web", "android_vr", "mweb")
+    # web_embedded 通常能提供无需 GVS PO Token 的完整 DASH 视频流；
+    # android_vr 在部分视频上也有高画质，但可能受 PO Token/403 限制。
+    # web、mweb 只作为兼容性兜底，可能只能提供较低分辨率。
+    attempts = ("web_embedded", "android_vr", "web", "mweb")
     errors = []
-    for client in attempts:
+    best_file: Path | None = None
+    best_file_key: tuple[int, int] | None = None
+    force_overwrite = False
+    existing_files = sorted(
+        (
+            path
+            for path in download_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in {".mp4", ".webm", ".mkv"}
+        ),
+        key=_downloaded_file_sort_key,
+    )
+    if existing_files and max_height:
+        existing_resolution = probe_video_resolution(existing_files[-1])
+        if not existing_resolution or existing_resolution[1] < max_height:
+            force_overwrite = True
+            current_height = existing_resolution[1] if existing_resolution else "未知"
+            print(
+                f"检测到已有视频缓存（{current_height}p），低于目标 {max_height}p；"
+                "将强制重新下载高画质流。"
+            )
+    for attempt_index, client in enumerate(attempts):
         command = [
             *shared_args,
+            *(["--force-overwrites"] if force_overwrite else []),
             "--extractor-args",
             f"youtube:player_client={client}",
             "-f",
@@ -175,18 +284,81 @@ def download_youtube_video(url: str, output_dir: Path, proxy: str | None, max_he
             url,
         ]
         print(f"下载尝试：{client} 客户端")
-        result = subprocess.run(command, text=True, capture_output=True)
+        before_files = {
+            path: (path.stat().st_mtime_ns, path.stat().st_size)
+            for path in download_dir.iterdir()
+            if path.is_file()
+        }
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            env=_yt_dlp_environment(),
+        )
         if result.returncode == 0:
             files = sorted(
-                path
-                for path in download_dir.iterdir()
-                if path.is_file() and path.suffix.lower() in {".mp4", ".webm", ".mkv"}
+                (
+                    path
+                    for path in download_dir.iterdir()
+                    if (
+                        path.is_file()
+                        and path.suffix.lower() in {".mp4", ".webm", ".mkv"}
+                        and (
+                            path not in before_files
+                            or (
+                                path.stat().st_mtime_ns,
+                                path.stat().st_size,
+                            )
+                            != before_files[path]
+                        )
+                    )
+                ),
+                key=_downloaded_file_sort_key,
             )
+            # yt-dlp 可能因为目标文件已存在而不更新文件，仍允许复用该文件。
+            if not files:
+                files = sorted(
+                    (
+                        path
+                        for path in download_dir.iterdir()
+                        if path.is_file() and path.suffix.lower() in {".mp4", ".webm", ".mkv"}
+                    ),
+                    key=_downloaded_file_sort_key,
+                )
             if files:
-                print(f"下载完成：{files[-1]}")
-                return files[-1]
+                selected_file = files[-1]
+                resolution = probe_video_resolution(selected_file)
+                selected_key = _downloaded_file_sort_key(selected_file)
+                if best_file_key is None or selected_key > best_file_key:
+                    best_file = selected_file
+                    best_file_key = selected_key
+                if resolution:
+                    width, height = resolution
+                    print(f"下载完成：{selected_file}（{width}x{height}）")
+                    if max_height and height < max_height:
+                        print(
+                            f"提示：已请求最高 {max_height}p，当前可完整下载的流为 {height}p；"
+                            "继续尝试其他客户端获取更高画质。"
+                        )
+                        if attempt_index < len(attempts) - 1:
+                            # 下一客户端可能仍使用相同的 id.ext 文件名，必须覆盖
+                            # 当前低清缓存，否则 yt-dlp 会直接复用旧文件。
+                            force_overwrite = True
+                            continue
+                else:
+                    print(f"下载完成：{selected_file}")
+                return selected_file
         error_text = (result.stderr or result.stdout).strip().splitlines()
         errors.append(f"{client}: {error_text[-1] if error_text else '未知下载错误'}")
+
+    if best_file is not None:
+        resolution = probe_video_resolution(best_file)
+        if resolution and max_height and resolution[1] < max_height:
+            print(
+                f"提示：所有客户端均未能完整下载 {max_height}p，"
+                f"将使用可用的最高分辨率 {resolution[0]}x{resolution[1]}。"
+            )
+        return best_file
 
     raise RuntimeError("YouTube 视频下载失败：" + "；".join(errors))
 
@@ -261,6 +433,127 @@ def trim_light_card(image: np.ndarray, expected_height: int | None = None) -> np
         return image
     x, y, width, height = best_box
     return image[y : y + height, x : x + width].copy()
+
+
+def trim_embedded_light_card(image: np.ndarray) -> np.ndarray:
+    """从候选图中裁出嵌在动态背景里的浅色矩形文档。
+
+    某些视频的文档边缘在稳定性检测中会和背景连成一个大框。最终导出前
+    再看浅色像素的横、纵投影，只接受至少一条轴存在清晰内嵌边界且内部
+    大面积连续的矩形。另一条轴可以贴住候选边缘，这是视频把文档上下端
+    截满、但左右混入动态背景时的常见情况；两条轴都贴边的完整图片不会
+    被再次误裁。
+    """
+    if image.ndim != 3 or image.shape[0] < 80 or image.shape[1] < 80:
+        return image
+
+    image_height, image_width = image.shape[:2]
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    minimum_width = max(48, round(image_width * 0.35))
+    minimum_height = max(48, round(image_height * 0.45))
+    margin_x = max(4, round(image_width * 0.025))
+    margin_y = max(3, round(image_height * 0.02))
+    candidates: list[tuple[float, tuple[int, int, int, int]]] = []
+
+    # 先用严格白色，再逐步放宽到浅灰色，兼容扫描件和网页报告的不同
+    # 压缩效果。连续投影比单个轮廓更不容易被正文文字切碎。
+    for saturation_limit, value_limit in ((75, 200), (100, 180), (120, 160)):
+        light_mask = (
+            (hsv[:, :, 1] <= saturation_limit)
+            & (hsv[:, :, 2] >= value_limit)
+        ).astype(np.uint8)
+        light_mask = cv2.morphologyEx(
+            light_mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+            iterations=1,
+        )
+        column_profile = np.mean(light_mask, axis=0)
+        row_profile = np.mean(light_mask, axis=1)
+        column_runs = _profile_runs(column_profile, 0.30, minimum_width)
+        row_runs = _profile_runs(row_profile, 0.30, minimum_height)
+        if not column_runs or not row_runs:
+            continue
+
+        for left, right in column_runs:
+            for top, bottom in row_runs:
+                width = right - left
+                height = bottom - top
+                area_ratio = width * height / max(1, image_width * image_height)
+                aspect_ratio = width / max(1, height)
+                # 至少保留一条轴上的内嵌边界。若矩形四边都贴住候选边缘，
+                # 通常就是已经完整裁出的图片，不应因为内部留白再次缩小。
+                internal_edges = sum(
+                    (
+                        left >= margin_x,
+                        right <= image_width - margin_x,
+                        top >= margin_y,
+                        bottom <= image_height - margin_y,
+                    )
+                )
+                if (
+                    internal_edges == 0
+                    or area_ratio < 0.20
+                    or area_ratio > 0.90
+                    or not 0.35 <= aspect_ratio <= 3.5
+                ):
+                    continue
+
+                interior_quality = float(np.mean(light_mask[top:bottom, left:right]))
+                if interior_quality < 0.60:
+                    continue
+
+                # 需要确认存在的内嵌边界确实是从背景进入/离开，而不是文档
+                # 内部的一块白色标题区域。贴住候选边缘的边不参与评分。
+                profile_edges = []
+                edge_specs = (
+                    (column_profile, left, left >= margin_x, "start"),
+                    (column_profile, right, right <= image_width - margin_x, "end"),
+                    (row_profile, top, top >= margin_y, "start"),
+                    (row_profile, bottom, bottom <= image_height - margin_y, "end"),
+                )
+                for profile, position, is_internal, _side in edge_specs:
+                    if not is_internal:
+                        continue
+                    window = max(2, min(8, round(min(width, height) * 0.025)))
+                    before_start = max(0, position - window)
+                    before = float(np.mean(profile[before_start:position]))
+                    after_end = min(len(profile), position + window)
+                    after = float(np.mean(profile[position:after_end]))
+                    inside = float(np.mean(profile[max(0, position - 2) : min(len(profile), position + 2)]))
+                    profile_edges.append(max(inside - before, inside - after))
+                if not profile_edges or min(profile_edges) < 0.12:
+                    continue
+
+                # 局部外圈应明显比矩形内部更少浅色，否则很可能只是整张
+                # 白底图片中的文字/留白，不能据此缩小原始候选。
+                ring = np.zeros_like(light_mask, dtype=bool)
+                ring_left = max(0, left - max(4, round(width * 0.04)))
+                ring_top = max(0, top - max(4, round(height * 0.04)))
+                ring_right = min(image_width, right + max(4, round(width * 0.04)))
+                ring_bottom = min(image_height, bottom + max(4, round(height * 0.04)))
+                ring[ring_top:ring_bottom, ring_left:ring_right] = True
+                ring[top:bottom, left:right] = False
+                if not np.any(ring):
+                    continue
+                outer_quality = float(np.mean(light_mask[ring]))
+                if outer_quality > min(0.45, interior_quality * 0.80):
+                    continue
+
+                score = area_ratio * interior_quality * (1.0 + min(profile_edges) * 2.0)
+                candidates.append((score, (left, top, width, height)))
+
+        # 严格阈值已经找到可信矩形时，不让更宽松阈值扩大到背景。
+        if candidates:
+            break
+
+    if not candidates:
+        return image
+    _score, (left, top, width, height) = max(candidates, key=lambda item: item[0])
+    inset = 1
+    if width <= inset * 2 + 24 or height <= inset * 2 + 24:
+        return image
+    return image[top + inset : top + height - inset, left + inset : left + width - inset].copy()
 
 
 def trim_rectangular_card(image: np.ndarray, expected_height: int | None = None) -> np.ndarray | None:
@@ -1225,7 +1518,10 @@ def detect_static_portrait_candidate(
         if box[2] <= 24 or box[3] <= 24:
             return None
         x, y, box_width, box_height = box
-        if box_width * box_height / max(1, frame_width * frame_height) < DEFAULT_MIN_AREA_RATIO:
+        if (
+            box_width * box_height / max(1, frame_width * frame_height)
+            < DEFAULT_PORTRAIT_MIN_AREA_RATIO
+        ):
             # 过小的固定台标、按钮和角标虽然可能满足局部稳定条件，
             # 但不属于需要提取的图片素材。
             continue
@@ -1281,6 +1577,8 @@ def detect_static_card_candidates(
     delta = cv2.absdiff(previous_gray, gray)
     stable_mask = delta <= diff_threshold
     frame_area = frame_width * frame_height
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    light_mask = (hsv[:, :, 1] <= 130) & (hsv[:, :, 2] >= 135)
     refinement_context = build_picture_refinement_context(frame, stable_mask)
 
     portrait_candidate = detect_static_portrait_candidate(
@@ -1317,9 +1615,11 @@ def detect_static_card_candidates(
         outside_motion = float(np.mean(~stable_mask[outside_mask]))
         patch_gray = raw_gray[y : y + height, x : x + width]
         sharpness = float(cv2.Laplacian(patch_gray, cv2.CV_64F).var())
+        patch_light_ratio = float(np.mean(light_mask[y : y + height, x : x + width]))
         if (
             DEFAULT_CARD_MIN_AREA_RATIO <= area_ratio <= 0.75
             and outside_motion >= DEFAULT_MIN_BACKGROUND_MOTION
+            and patch_light_ratio >= 0.35
             and sharpness >= 10.0
         ):
             image = crop_original_frame(original_frame, strict_box, inverse_scale, padding=0)
@@ -1368,8 +1668,6 @@ def detect_static_card_candidates(
     if len(vertical_lines) < 2:
         return []
 
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    light_mask = (hsv[:, :, 1] <= 130) & (hsv[:, :, 2] >= 135)
     scored_boxes: list[tuple[float, tuple[int, int, int, int]]] = []
 
     for left_index, left_line in enumerate(vertical_lines[:-1]):
@@ -1565,10 +1863,18 @@ def tracks_can_merge(first: Track, second: Track) -> bool:
     """判断两个已结束轨迹是否是同一张图的重叠检测结果。"""
     if first.detector != second.detector:
         return False
-    # 只合并时间上确实重叠的轨迹。不同素材连续切换时，即使卡片位置
-    # 相同，也不会因为边界相似而被串成一张图。
-    if min(first.last_time, second.last_time) <= max(first.start_time, second.start_time):
-        return False
+    temporal_overlap = min(first.last_time, second.last_time) > max(
+        first.start_time, second.start_time
+    )
+    # 检测器可能在一个采样间隔内暂时丢失同一张图。仅对很短的间隔
+    # 放宽时间条件，后面还会同时检查几何覆盖和图像指纹，避免把相邻
+    # 切换的两张完整图片串成一条轨迹。
+    if not temporal_overlap:
+        gap = max(first.start_time, second.start_time) - min(
+            first.last_time, second.last_time
+        )
+        if gap > 1.5:
+            return False
     overlap = box_iou(first.box, second.box)
     coverage = max(
         _box_coverage(first.box, second.box),
@@ -1580,6 +1886,17 @@ def tracks_can_merge(first: Track, second: Track) -> bool:
     # 同一张图在转场或编码波动期间可能只剩约四分之三的可见区域；
     # 只有“小框明显小于大框”时放宽覆盖阈值，避免把相邻完整图片合并。
     strong_partial_containment = coverage >= 0.70 and relative_area <= 0.55
+    if not temporal_overlap:
+        distance = hash_distance(first.last_signature, second.last_signature)
+        # 同一张卡片在短暂丢检后，边缘可能从局部框恢复为完整框；这类
+        # 轨迹通常保持大部分区域重叠，且面积相近。允许轻微的 dHash
+        # 漂移，但仍要求较强的几何一致性，避免串联相邻素材。
+        adjacent_same_region = overlap >= 0.60 and relative_area >= 0.75
+        adjacent_partial = coverage >= 0.90 and relative_area <= 0.60
+        if not (adjacent_partial or adjacent_same_region):
+            return False
+        if distance is not None and distance > 32:
+            return False
     return overlap >= 0.45 or coverage >= 0.78 or strong_partial_containment
 
 
@@ -1756,19 +2073,25 @@ def save_track(
     duration = track.last_time - track.start_time
     if duration + 0.01 < min_static_seconds:
         return False
-    if is_duplicate(track.best_frame, saved_hashes):
+    image = track.best_frame
+    # 卡片检测偶尔会把文档两侧的动态背景一起纳入稳定框；导出前只对
+    # 已确认的卡片轨迹做浅色矩形二次裁切，通用候选和 --no-trim 模式不受影响。
+    if track.detector == "card":
+        image = trim_embedded_light_card(image)
+    if is_duplicate(image, saved_hashes):
         print(f"跳过重复图片：{format_timestamp(track.start_time)}")
         return False
 
     filename = f"{output_index:03d}_{format_timestamp(track.start_time)}_{duration:.1f}s.png"
     output_path = output_dir / filename
-    if not cv2.imwrite(str(output_path), track.best_frame):
+    if not cv2.imwrite(str(output_path), image):
         raise RuntimeError(f"无法写入图片：{output_path}")
 
-    saved_hashes.append(image_hash(track.best_frame))
+    saved_hashes.append(image_hash(image))
     metadata.append(
         {
             "file": filename,
+            "image_resolution": [int(image.shape[1]), int(image.shape[0])],
             "start_seconds": round(track.start_time, 3),
             "end_seconds": round(track.last_time, 3),
             "duration_seconds": round(duration, 3),
@@ -1912,6 +2235,7 @@ def extract_static_images_at_timestamps(
     motion_window_seconds: float = DEFAULT_MOTION_WINDOW_SECONDS,
     analysis_width: int = DEFAULT_ANALYSIS_WIDTH,
     search_seconds: float = 12.0,
+    source_resolution: tuple[int, int] | None = None,
 ) -> list[dict]:
     """按指定时间点导出经连续静止时长验证的完整图片卡片。"""
     if sample_fps <= 0 or min_static_seconds <= 0 or search_seconds <= 0:
@@ -2022,6 +2346,7 @@ def extract_static_images_at_timestamps(
         image = crop_original_frame(source_frame, selected_box, inverse_scale, padding=0)
         if image.size == 0:
             raise RuntimeError(f"无法从确认帧裁切图片：{format_timestamp(timestamp)}")
+        image = trim_embedded_light_card(image)
         if not cv2.imwrite(str(output_path), image):
             raise RuntimeError(f"无法写入图片：{output_path}")
 
@@ -2029,6 +2354,7 @@ def extract_static_images_at_timestamps(
         metadata.append(
             {
                 "file": filename,
+                "image_resolution": [int(image.shape[1]), int(image.shape[0])],
                 "requested_seconds": round(timestamp, 3),
                 "first_confirmed_seconds": round(selected.start_time, 3),
                 "last_confirmed_seconds": round(selected.last_time, 3),
@@ -2048,6 +2374,7 @@ def extract_static_images_at_timestamps(
         json.dumps(
             {
                 "source_video": str(video_path),
+                "source_resolution": list(source_resolution) if source_resolution else None,
                 "mode": "timestamp_review",
                 "sample_fps": sample_fps,
                 "min_static_seconds": min_static_seconds,
@@ -2078,6 +2405,7 @@ def extract_static_images(
     motion_window_seconds: float = DEFAULT_MOTION_WINDOW_SECONDS,
     max_track_gap_seconds: float = 3.0,
     analysis_width: int = DEFAULT_ANALYSIS_WIDTH,
+    source_resolution: tuple[int, int] | None = None,
 ) -> list[dict]:
     """提取静态图片并返回每张图片的时间与区域元数据。"""
     if sample_fps <= 0 or min_static_seconds <= 0:
@@ -2206,6 +2534,7 @@ def extract_static_images(
         json.dumps(
             {
                 "source_video": str(video_path),
+                "source_resolution": list(source_resolution) if source_resolution else None,
                 "sample_fps": sample_fps,
                 "min_static_seconds": min_static_seconds,
                 "sampled_frames": sample_count,
@@ -2247,7 +2576,7 @@ def parse_args() -> argparse.Namespace:
         help="每个指定时间点后继续复核的秒数，默认 12。",
     )
     parser.add_argument("--proxy", default=os.environ.get("YOUTUBE_PROXY"), help="下载 YouTube 时使用的代理，例如 http://127.0.0.1:7890。")
-    parser.add_argument("--download-height", type=int, default=720, help="URL 下载分析视频的最大高度，默认 720。")
+    parser.add_argument("--download-height", type=int, default=1080, help="URL 下载分析视频的最大高度，默认 1080。")
     return parser.parse_args()
 
 
@@ -2262,6 +2591,10 @@ def main() -> int:
             if not video_path.is_file():
                 raise FileNotFoundError(f"视频文件不存在：{video_path}")
 
+        source_resolution = probe_video_resolution(video_path)
+        if source_resolution:
+            print(f"源视频分辨率：{source_resolution[0]}x{source_resolution[1]}")
+
         if args.timestamps:
             extract_static_images_at_timestamps(
                 video_path,
@@ -2273,6 +2606,7 @@ def main() -> int:
                 motion_window_seconds=args.motion_window_seconds,
                 analysis_width=args.analysis_width,
                 search_seconds=args.timestamp_search_seconds,
+                source_resolution=source_resolution,
             )
         else:
             extract_static_images(
@@ -2288,6 +2622,7 @@ def main() -> int:
                 motion_window_seconds=args.motion_window_seconds,
                 max_track_gap_seconds=args.max_track_gap_seconds,
                 analysis_width=args.analysis_width,
+                source_resolution=source_resolution,
             )
         return 0
     except Exception as error:

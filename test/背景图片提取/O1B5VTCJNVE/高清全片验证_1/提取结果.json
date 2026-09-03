@@ -1,0 +1,63 @@
+{
+  "source_video": "/home/github/video_info/test/背景图片提取/O1B5VTCJNVE/高清验证_4/下载视频/O1B5VTCJNVE.mp4",
+  "source_resolution": [
+    1920,
+    1080
+  ],
+  "sample_fps": 2.0,
+  "min_static_seconds": 5.0,
+  "sampled_frames": 1601,
+  "images": [
+    {
+      "file": "001_02m11s_186.5s.png",
+      "image_resolution": [
+        884,
+        710
+      ],
+      "start_seconds": 131.5,
+      "end_seconds": 318.0,
+      "duration_seconds": 186.5,
+      "samples": 368,
+      "analysis_box": [
+        255,
+        49,
+        442,
+        355
+      ]
+    },
+    {
+      "file": "002_09m55s_31.0s.png",
+      "image_resolution": [
+        628,
+        556
+      ],
+      "start_seconds": 595.5,
+      "end_seconds": 626.5,
+      "duration_seconds": 31.0,
+      "samples": 51,
+      "analysis_box": [
+        105,
+        22,
+        550,
+        279
+      ]
+    },
+    {
+      "file": "003_10m33s_25.0s.png",
+      "image_resolution": [
+        634,
+        727
+      ],
+      "start_seconds": 633.5,
+      "end_seconds": 658.5,
+      "duration_seconds": 25.0,
+      "samples": 28,
+      "analysis_box": [
+        146,
+        38,
+        533,
+        394
+      ]
+    }
+  ]
+}
