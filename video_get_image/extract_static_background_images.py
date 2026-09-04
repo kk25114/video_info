@@ -10,7 +10,7 @@
     python3 video_get_image/extract_static_background_images.py input.mp4
     python3 video_get_image/extract_static_background_images.py \
         'https://www.youtube.com/watch?v=nLyNfTbbAxQ' \
-        --output-dir test/背景图片提取/素材 --min-static-seconds 5
+        --output-dir test/背景图片提取/素材 --min-static-seconds 4
 
 依赖：opencv-python、numpy、yt-dlp（仅 URL 输入需要）、ffmpeg（yt-dlp 合并时需要）。
 """
@@ -31,7 +31,7 @@ import numpy as np
 
 
 DEFAULT_SAMPLE_FPS = 4.0
-DEFAULT_MIN_STATIC_SECONDS = 5.0
+DEFAULT_MIN_STATIC_SECONDS = 4.0
 DEFAULT_DIFF_THRESHOLD = 5
 DEFAULT_MIN_AREA_RATIO = 0.05
 DEFAULT_MIN_BACKGROUND_MOTION = 0.03
@@ -2247,7 +2247,7 @@ def extract_static_images_at_timestamps(
 
     for output_index, timestamp in enumerate(timestamps, start=1):
         # 时间点可能落在卡片的展示中段，例如 0:54 的文章图已在数秒前
-        # 出现。向前补扫一个最短静止时长，才能真正验证它持续展示至少 5 秒。
+        # 出现。向前补扫一个最短静止时长，才能真正验证它持续展示至少 4 秒。
         search_start = max(0.0, timestamp - min_static_seconds)
         tracks = _collect_card_tracks_near_timestamp(
             video_path,
@@ -2556,7 +2556,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("source", help="本地视频文件路径或 YouTube 视频链接。")
     parser.add_argument("--output-dir", type=Path, default=Path("test/背景图片提取/素材"), help="图片输出目录。")
     parser.add_argument("--sample-fps", type=float, default=DEFAULT_SAMPLE_FPS, help="检测采样频率，默认每秒 4 帧。")
-    parser.add_argument("--min-static-seconds", type=float, default=DEFAULT_MIN_STATIC_SECONDS, help="图片最短静止时长，默认 5 秒。")
+    parser.add_argument("--min-static-seconds", type=float, default=DEFAULT_MIN_STATIC_SECONDS, help="图片最短静止时长，默认 4 秒。")
     parser.add_argument("--diff-threshold", type=int, default=DEFAULT_DIFF_THRESHOLD, help="跨窗口像素差阈值，默认 5。")
     parser.add_argument("--min-area-ratio", type=float, default=DEFAULT_MIN_AREA_RATIO, help="候选图片最小画面占比，默认 0.05。")
     parser.add_argument("--min-background-motion", type=float, default=DEFAULT_MIN_BACKGROUND_MOTION, help="候选区域外最小运动像素比例，默认 0.03。")

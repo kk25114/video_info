@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -34,6 +35,31 @@ DEFAULT_PROCESSED_LOG = PROJECT_ROOT / "2.sunrich" / "processed_videos.log"
 DEFAULT_WORK_DIR = Path("/tmp/video_info_latest_video_images")
 VIDEO_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+
+
+def format_elapsed(seconds: float) -> str:
+    """将耗时格式化为便于阅读的中文时间。"""
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} 毫秒"
+    if seconds < 60:
+        return f"{seconds:.2f} 秒"
+    return f"{seconds / 60:.2f} 分钟"
+
+
+def print_time_distribution(timings: dict[str, float], total_seconds: float) -> None:
+    """输出单个视频处理各阶段的耗时和占比。"""
+    print("处理时间分布：")
+    measured_seconds = 0.0
+    for label, seconds in timings.items():
+        measured_seconds += seconds
+        percentage = seconds / total_seconds * 100 if total_seconds > 0 else 0.0
+        print(f"  {label}：{format_elapsed(seconds)}（{percentage:.1f}%）")
+
+    other_seconds = max(0.0, total_seconds - measured_seconds)
+    if other_seconds >= 0.005:
+        percentage = other_seconds / total_seconds * 100 if total_seconds > 0 else 0.0
+        print(f"  其他：{format_elapsed(other_seconds)}（{percentage:.1f}%）")
+    print(f"  总耗时：{format_elapsed(total_seconds)}")
 
 
 def load_extractor_module():
@@ -180,11 +206,13 @@ def extract_latest_video_images(
     proxy: str | None = None,
     download_height: int = 1080,
     sample_fps: float = 2.0,
-    min_static_seconds: float = 5.0,
+    min_static_seconds: float = 4.0,
     analysis_width: int = 960,
     keep_existing: bool = False,
 ) -> list[dict]:
     """下载最新视频并把识别到的图片输出到目标目录。"""
+    overall_started = time.perf_counter()
+    timings: dict[str, float] = {}
     source_url = url.strip() if url else get_latest_video_url(processed_log)
     video_id = extract_video_id(source_url)
     if not video_id:
@@ -198,14 +226,19 @@ def extract_latest_video_images(
 
     print(f"最新视频：{source_url}")
     print(f"工作目录：{work_video_dir}")
+    stage_started = time.perf_counter()
     video_path = EXTRACTOR.download_youtube_video(
         source_url,
         work_video_dir,
         proxy,
         download_height,
     )
+    timings["下载视频"] = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     source_duration = probe_duration(video_path)
     source_resolution = EXTRACTOR.probe_video_resolution(video_path)
+    timings["读取视频信息"] = time.perf_counter() - stage_started
     resolution_text = (
         f"{source_resolution[0]}x{source_resolution[1]}" if source_resolution else "未知"
     )
@@ -220,6 +253,7 @@ def extract_latest_video_images(
         if path.is_file() and (path.suffix.lower() in IMAGE_SUFFIXES or path.name == "提取结果.json"):
             path.unlink()
 
+    stage_started = time.perf_counter()
     metadata = EXTRACTOR.extract_static_images(
         video_path,
         work_output_dir,
@@ -228,11 +262,14 @@ def extract_latest_video_images(
         analysis_width=analysis_width,
         source_resolution=source_resolution,
     )
+    timings["静止图片检测"] = time.perf_counter() - stage_started
 
     if not metadata:
         print("未检测到符合条件的静止图片，目标目录未做清理。")
+        print_time_distribution(timings, time.perf_counter() - overall_started)
         return []
 
+    stage_started = time.perf_counter()
     if not keep_existing:
         removed = clean_output_images(output_dir)
         if removed:
@@ -271,6 +308,8 @@ def extract_latest_video_images(
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"完成：共输出 {len(exported)} 张图片到 {output_dir}")
     print(f"清单：{manifest_path}")
+    timings["结果导出"] = time.perf_counter() - stage_started
+    print_time_distribution(timings, time.perf_counter() - overall_started)
     return exported
 
 
@@ -283,7 +322,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--proxy", default=os.environ.get("YOUTUBE_PROXY"), help="YouTube 下载代理。")
     parser.add_argument("--download-height", type=int, default=1080, help="最高下载高度，默认 1080。")
     parser.add_argument("--sample-fps", type=float, default=2.0, help="静止检测采样频率，默认每秒 2 帧。")
-    parser.add_argument("--min-static-seconds", type=float, default=5.0, help="图片至少静止的秒数，默认 5 秒。")
+    parser.add_argument("--min-static-seconds", type=float, default=4.0, help="图片至少静止的秒数，默认 4 秒。")
     parser.add_argument("--analysis-width", type=int, default=960, help="检测用画面宽度，默认 960；导出仍使用原始帧。")
     parser.add_argument("--keep-existing", action="store_true", help="不清理 images 目录中的旧图片。")
     return parser.parse_args()
