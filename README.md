@@ -136,6 +136,13 @@ python3 build.py
 # ✅ 全部完成！
 ```
 
+### 5. Windows 小红书发布
+
+Windows 10 使用仓库根目录的 `publish_latest.ps1`（也可运行
+`publish_latest.cmd`）。发布器会复用 Windows Chrome 的已登录用户配置，上传
+最新 MP4 到小红书创作服务平台；详细安装、配置目录和参数见
+[`xiaohongshu_playwright/使用说明.md`](xiaohongshu_playwright/使用说明.md)。
+
 ---
 
 ## ⚙️ 安装配置

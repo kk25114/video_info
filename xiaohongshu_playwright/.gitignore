@@ -1,0 +1,7 @@
+# 登录态和浏览器用户数据包含账号敏感信息，严禁提交。
+storage_state.json
+browser_profile/
+test/*.png
+
+__pycache__/
+*.py[cod]
