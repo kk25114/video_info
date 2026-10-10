@@ -121,6 +121,23 @@ python3 build.py
    - xxx.png（封面图）
 ```
 
+需要按文稿搜索并叠加图片时，先生成素材清单，再运行构建脚本：
+
+```bash
+python3 mk_video/search_materials.py \
+  --article '2.sunrich/0499_懂车帝也被解决了？.md' \
+  --video-duration 686.484 \
+  --max-materials 5
+python3 mk_video/build.py
+```
+
+素材和 `materials.json` 保存在 `mk_video/images/`。脚本优先搜索微信公众号文章，
+按文稿主题筛选文章并使用公开结果页提供的文章封面，再搜索 Openverse/Wikimedia。
+清单记录文章标题、公众号、搜索来源、许可信息、开始时间、显示时长、缩放比例和画面位置；
+运行 `build.py` 会按这些设置叠加图片。微信公众号图片的授权状态记为 `unknown`，
+发布前应检查素材和使用权限。添加 `--clean` 只会删除上次清单列出的下载素材；
+确实需要更多候选时可追加 `--include-bing`，并检查 `materials.json`。
+
 ### 4. 一键流水线 - wrap_sunrich.sh
 **功能**: 全自动更新→朗读→视频制作
 

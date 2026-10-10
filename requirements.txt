@@ -1,5 +1,7 @@
 # 核心依赖
 requests
+beautifulsoup4
+Pillow
 youtube-transcript-api==1.2.4
 yt-dlp[default]==2026.8.19
 
