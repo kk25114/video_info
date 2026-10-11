@@ -131,12 +131,21 @@ python3 mk_video/search_materials.py \
 python3 mk_video/build.py
 ```
 
-素材和 `materials.json` 保存在 `mk_video/images/`。脚本优先搜索微信公众号文章，
-按文稿主题筛选文章并使用公开结果页提供的文章封面，再搜索 Openverse/Wikimedia。
+素材和 `materials.json` 保存在 `mk_video/images/`。中文关键词优先搜索微信公众号文章，
+脚本默认启动 WSL Chrome 打开文章正文，滚动读取 `#js_content` 中的懒加载图片并下载；
+如果公众号要求环境验证，则记录状态并回退到搜索结果页的文章封面。英文视觉关键词仍可补充 Openverse/Wikimedia。
 清单记录文章标题、公众号、搜索来源、许可信息、开始时间、显示时长、缩放比例和画面位置；
 运行 `build.py` 会按这些设置叠加图片。微信公众号图片的授权状态记为 `unknown`，
 发布前应检查素材和使用权限。添加 `--clean` 只会删除上次清单列出的下载素材；
 确实需要更多候选时可追加 `--include-bing`，并检查 `materials.json`。
+
+如果需要人工完成公众号页面验证，可使用可见浏览器模式：
+
+```bash
+python3 mk_video/search_materials.py \
+  --article '2.sunrich/0499_懂车帝也被解决了？.md' \
+  --wechat-headful
+```
 
 ### 4. 一键流水线 - wrap_sunrich.sh
 **功能**: 全自动更新→朗读→视频制作
