@@ -15,9 +15,28 @@ fi
 
 echo "使用最新视频: $LATEST_VIDEO"
 
+# 自动发布默认使用虚拟 X Server，避免依赖或打扰可见桌面会话。
+# 需要人工操作浏览器验证时，可设置 DOUYIN_VISIBLE_BROWSER=1 显式使用当前桌面。
+BROWSER_LAUNCH=()
+if [[ "${DOUYIN_VISIBLE_BROWSER:-0}" == "1" ]]; then
+  if [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+    echo "可见浏览器模式需要 DISPLAY 或 WAYLAND_DISPLAY 已配置" >&2
+    exit 1
+  fi
+  echo "使用可见桌面启动 Chrome（人工验证模式）"
+elif command -v xvfb-run >/dev/null 2>&1; then
+  BROWSER_LAUNCH=(xvfb-run -a)
+  echo "常规发布使用 Xvfb 启动 Chrome"
+elif [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+  echo "找不到 xvfb-run，且没有可用的桌面显示器" >&2
+  exit 1
+else
+  echo "找不到 xvfb-run，回退到当前桌面启动 Chrome"
+fi
+
 # 强制直连：仅对本次发布命令生效，不影响系统代理环境
 env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY -u ftp_proxy -u FTP_PROXY -u NO_PROXY -u no_proxy \
-python3 /home/github/video_info/douyin_playwright/scripts/publish_video.py \
+  "${BROWSER_LAUNCH[@]}" python3 /home/github/video_info/douyin_playwright/scripts/publish_video.py \
   --video "$LATEST_VIDEO" \
   --auto-desc \
   --caption-mode desc \

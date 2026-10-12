@@ -147,20 +147,19 @@ python3 mk_video/search_materials.py \
   --wechat-headful
 ```
 
-### 4. 一键流水线 - wrap_sunrich.sh
-**功能**: 全自动更新→朗读→视频制作
+### 4. 日常抖音发布流程
+`wrap_sunrich.sh` 检测并获取最新文稿，生成配音/字幕，并按最新文稿搜索公众号图片素材；素材和放置清单写入 `mk_video/images/`。然后运行 `publish_latest.sh`，构建最新视频并发布到抖音。
 
 ```bash
-# 一键执行完整流程
+# 获取最新内容、生成配音/字幕并搜索配图
 ./wrap_sunrich.sh
 
-# 输出示例：
-# 🔍 发现新视频 3 个
-# 📥 已获取字幕 3 篇
-# 🔊 已合成语音 3 条
-# 🎬 已制作视频 3 个
-# ✅ 全部完成！
+# 构建并发布最新视频
+./publish_latest.sh
 ```
+
+没有新文稿时，`wrap_sunrich.sh` 会结束且不会触发发布。图片搜索没有找到可用素材时会记录提示，构建仍可使用原有视频背景继续。
+`publish_latest.sh` 默认通过 Xvfb 启动 Chrome；需要人工扫码或处理验证时，可设置 `DOUYIN_VISIBLE_BROWSER=1` 并确保桌面显示环境已配置。
 
 ### 5. Windows 小红书发布
 

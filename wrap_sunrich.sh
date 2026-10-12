@@ -117,6 +117,8 @@ echo "   清理完成"
 echo "🧹 旧音频和字幕文件清理完成"
 
 # ---------- 4. 对新增文稿逐个合成语音 ----------
+LATEST_MD=""
+LATEST_WAV=""
 for md in "${NEW_MD_ARRAY[@]}"; do
   [[ -z "$md" ]] && continue
   base=$(basename "$md" .md)
@@ -128,7 +130,32 @@ for md in "${NEW_MD_ARRAY[@]}"; do
   fi
   echo "   完成 $wav"
   echo "✅ 语音合成完成: $wav"
+  # 与 build.py 按最新 WAV 选择的文稿保持一致。
+  LATEST_MD="$md"
+  LATEST_WAV="$wav"
 done
+
+# ---------- 5. 为即将发布的最新文稿搜索图片素材 ----------
+if [[ -n "$LATEST_MD" && -n "$LATEST_WAV" ]]; then
+  SEARCH_ARGS=(
+    --article "$LATEST_MD"
+    --output-dir "$SAVE_DIR/images"
+    --clean
+    --max-materials 5
+  )
+
+  # 语音时长近似成片时长，用于安排素材的出现时间。
+  if AUDIO_DURATION=$(/usr/bin/ffprobe -v error -show_entries format=duration \
+    -of default=noprint_wrappers=1:nokey=1 "$LATEST_WAV" 2>/dev/null) &&
+    [[ "$AUDIO_DURATION" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    SEARCH_ARGS+=(--video-duration "$AUDIO_DURATION")
+  fi
+
+  echo "🔎 按最新文稿搜索图片素材: $LATEST_MD"
+  if ! /usr/bin/python3 mk_video/search_materials.py "${SEARCH_ARGS[@]}"; then
+    echo "⚠️ 本次没有生成可用素材清单，发布将继续使用现有视频背景。"
+  fi
+fi
 
 echo "✅ wrap_sunrich.sh 完成，本次处理 ${#NEW_MD_ARRAY[@]} 篇"
 echo "=== wrap_sunrich.sh 执行完成 - $(date '+%Y-%m-%d %H:%M:%S') ==="
