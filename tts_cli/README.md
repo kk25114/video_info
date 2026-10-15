@@ -48,6 +48,19 @@ python3 long_tts_with_srt.py ../2.sunrich/0075_释永信的问题，没那么简
 
 配置修改后立即生效，无需重启任何服务。
 
+### 多 Key 备用
+
+`config.json` 可配置多个官方 Azure Speech Key。脚本先尝试列表中的第一个 Key；遇到认证失败时自动切到后续 Key，并在本次进程中记住成功的 Key，后续分段优先使用它。旧配置中的单个 `speechKey` 仍兼容。
+
+```json
+{
+  "speechKeys": ["primary-key", "backup-key"],
+  "serviceRegion": "canadaeast"
+}
+```
+
+也可以通过 `AZURE_SPEECH_KEYS` 环境变量覆盖配置，多个 Key 用逗号或分号分隔。请勿将实际密钥提交到 Git。
+
 ## 5. 代理与直连（解决 `WS_OPEN_ERROR` / `no connection to the remote host`）
 这类报错通常是 **网络不可达** 或 **代理/直连策略不匹配** 导致。
 

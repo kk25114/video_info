@@ -45,6 +45,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULT_CONFIG = {
     "speechKey": "",
+    "speechKeys": [],
     "serviceRegion": "westus",
     "voiceName": "zh-CN-XiaoxiaoNeural",
     "voiceStyle": "Default",
@@ -69,13 +70,38 @@ DEFAULT_CONFIG = {
 if not os.path.isfile(CONFIG_PATH):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(DEFAULT_CONFIG, f, ensure_ascii=False, indent=2)
-    print(f"已创建默认配置文件 {CONFIG_PATH} ，请填入 speechKey 后重新运行。")
+    print(f"已创建默认配置文件 {CONFIG_PATH}，请填入 speechKeys 或 speechKey 后重新运行。")
     sys.exit(0)
 
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     cfg = {**DEFAULT_CONFIG, **json.load(f)}
 
-SPEECH_KEY      = cfg["speechKey"]
+def load_speech_keys(config):
+    env_keys = os.environ.get("AZURE_SPEECH_KEYS", "").strip()
+    if env_keys:
+        candidates = re.split(r"[,;\n]+", env_keys)
+    else:
+        configured = config.get("speechKeys")
+        if isinstance(configured, list):
+            candidates = configured
+        elif configured:
+            candidates = [configured]
+        else:
+            candidates = [config.get("speechKey", "")]
+
+    keys = []
+    for candidate in candidates:
+        key = str(candidate or "").strip()
+        if key and key not in keys:
+            keys.append(key)
+    if not keys:
+        raise ValueError("未配置 Azure Speech Key，请设置 speechKeys 或 speechKey。")
+    return keys
+
+
+SPEECH_KEYS     = load_speech_keys(cfg)
+SPEECH_KEY      = SPEECH_KEYS[0]
+ACTIVE_SPEECH_KEY_INDEX = 0
 SERVICE_REGION  = cfg["serviceRegion"]
 VOICE_NAME      = cfg["voiceName"]
 VOICE_STYLE     = cfg["voiceStyle"]
@@ -669,6 +695,29 @@ def _is_connection_error(msg: str) -> bool:
     )
 
 
+def _is_auth_error(msg: str) -> bool:
+    low = msg.lower()
+    return any(
+        marker in low
+        for marker in (
+            "authenticationfailure",
+            "authentication failed",
+            "unauthorized",
+            "not authorized",
+            "invalid subscription key",
+            "subscription key is invalid",
+            "subscription key is not valid",
+            "http status code: 401",
+            "status code: 401",
+            " 401",
+            "forbidden",
+            "http status code: 403",
+            "status code: 403",
+            " 403",
+        )
+    )
+
+
 def _serialize_word_boundary(e) -> tuple:
     duration_ticks = int(round(e.duration.total_seconds() * 10_000_000))
     return (int(e.audio_offset), duration_ticks, e.text)
@@ -677,12 +726,13 @@ def _serialize_word_boundary(e) -> tuple:
 def _synthesize_worker(ssml: str, outfile: str, result_queue):
     boundaries = []
     try:
-        duration = synthesize(ssml, outfile, boundaries)
+        duration, key_index = synthesize(ssml, outfile, boundaries)
         duration_ticks = int(round(duration.total_seconds() * 10_000_000))
         result_queue.put({
             "ok": True,
             "duration_ticks": duration_ticks,
             "boundaries": [_serialize_word_boundary(e) for e in boundaries],
+            "key_index": key_index,
         })
     except Exception as e:
         result_queue.put({
@@ -697,8 +747,10 @@ def synthesize_with_timeout(ssml: str, outfile: str, word_boundaries: list) -> d
     Azure Speech SDK 的 speak_ssml_async(...).get() 偶尔不会按 SDK 配置超时返回。
     用子进程包住单段合成，超时后终止子进程并重试，避免 cron 长时间挂起。
     """
+    global ACTIVE_SPEECH_KEY_INDEX
     if SEGMENT_TIMEOUT_SECONDS <= 0:
-        return synthesize(ssml, outfile, word_boundaries)
+        duration, ACTIVE_SPEECH_KEY_INDEX = synthesize(ssml, outfile, word_boundaries)
+        return duration
 
     attempt = 0
     while True:
@@ -733,19 +785,20 @@ def synthesize_with_timeout(ssml: str, outfile: str, word_boundaries: list) -> d
         if result.get("ok"):
             word_boundaries.clear()
             word_boundaries.extend(result["boundaries"])
+            ACTIVE_SPEECH_KEY_INDEX = result.get("key_index", ACTIVE_SPEECH_KEY_INDEX)
             return datetime.timedelta(seconds=result["duration_ticks"] / 10_000_000)
 
         raise RuntimeError(result.get("message") or result.get("traceback") or "Segment worker failed")
 
 
-def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timedelta:
+def synthesize(ssml: str, outfile: str, word_boundaries: list) -> tuple[datetime.timedelta, int]:
     """
     调用 Azure Speech SDK 合成 ssml 保存为 outfile，
     并捕获词语时间戳。
-    返回合成音频的时长。
+    返回音频时长和成功使用的 Key 序号。
     """
-    def make_cfg(use_proxy: bool):
-        cfg = speechsdk.SpeechConfig(subscription=SPEECH_KEY, region=SERVICE_REGION)
+    def make_cfg(speech_key: str, use_proxy: bool):
+        cfg = speechsdk.SpeechConfig(subscription=speech_key, region=SERVICE_REGION)
         cfg.set_speech_synthesis_output_format(
             speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm
         )
@@ -767,6 +820,9 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
 
     bypass_modes = BYPASS_MODE_CANDIDATES
     bypass_idx = 0
+    key_order = list(range(ACTIVE_SPEECH_KEY_INDEX, len(SPEECH_KEYS)))
+    key_order.extend(range(0, ACTIVE_SPEECH_KEY_INDEX))
+    key_pos = 0
 
     attempt = 0
     while True:
@@ -780,7 +836,8 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
 
             use_proxy = not bypass_modes[bypass_idx]
             _apply_proxy_env(use_proxy)
-            cfg = make_cfg(use_proxy)
+            key_index = key_order[key_pos]
+            cfg = make_cfg(SPEECH_KEYS[key_index], use_proxy)
             synthesizer = speechsdk.SpeechSynthesizer(
                 speech_config=cfg,
                 audio_config=speechsdk.audio.AudioConfig(filename=outfile),
@@ -789,7 +846,7 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
 
             result = synthesizer.speak_ssml_async(ssml).get()
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                return result.audio_duration
+                return result.audio_duration, key_index
             elif result.reason == speechsdk.ResultReason.Canceled:
                 details = speechsdk.SpeechSynthesisCancellationDetails(result)
                 raise RuntimeError(f"Canceled: {details.reason} | {details.error_details}")
@@ -797,6 +854,22 @@ def synthesize(ssml: str, outfile: str, word_boundaries: list) -> datetime.timed
                 raise RuntimeError(result.reason)
         except Exception as e:
             msg = str(e)
+            if _is_auth_error(msg):
+                if key_pos + 1 < len(key_order):
+                    key_pos += 1
+                    attempt = 0
+                    if os.path.exists(outfile):
+                        os.remove(outfile)
+                    word_boundaries.clear()
+                    print(
+                        f"[Key切换] Azure Speech Key {key_index + 1} 认证失败，"
+                        f"切换到备用 Key {key_order[key_pos] + 1}。"
+                    )
+                    continue
+                raise RuntimeError(
+                    f"Azure Speech 所有 {len(SPEECH_KEYS)} 个 Key 均认证失败：{msg}"
+                ) from e
+
             is_connection_error = _is_connection_error(msg)
             if is_connection_error and bypass_idx + 1 < len(bypass_modes):
                 bypass_idx += 1
@@ -897,6 +970,7 @@ def main():
     split_limit = CHUNK_LIMIT
     if PROACTIVE_SPLIT_LIMIT and PROACTIVE_SPLIT_LIMIT > 0:
         split_limit = min(split_limit, PROACTIVE_SPLIT_LIMIT)
+    print(f"Azure Speech 区域: {SERVICE_REGION}；已配置 {len(SPEECH_KEYS)} 个 Key（认证失败时自动切换）。")
     segments = split_text(text, limit=split_limit)
     print(f"共 {len(segments)} 段，开始合成…（splitLimit={split_limit}）")
 
