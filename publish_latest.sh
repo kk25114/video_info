@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 /home/github/video_info/mk_video/build.py
+# 构建新成片；若音频/字幕已被上一轮构建消费掉（例如重复执行本脚本），
+# 则跳过构建，直接发布下载目录中已有的最新成片。
+if compgen -G "/home/github/video_info/mk_video/*.wav" > /dev/null; then
+  python3 /home/github/video_info/mk_video/build.py
+else
+  echo "未发现待构建的 .wav 音频，跳过构建，直接发布最新成片"
+fi
 
 
 VIDEO_DIR="/mnt/d/Program Files/下载"

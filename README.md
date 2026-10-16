@@ -91,7 +91,7 @@ python3 long_tts.py dummy.txt  # 自动生成config.json
 # 编辑配置
 nano config.json
 {
-  "speechKey": "你的Azure密钥",
+  "speechKeys": ["你的Azure密钥", "备用密钥（可选）"],
   "serviceRegion": "eastasia",
   "voiceName": "zh-CN-YunyangNeural",
   "saveDir": ""

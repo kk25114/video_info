@@ -31,8 +31,26 @@ def _load_api_key() -> Optional[str]:
     return data.get("DEEPSEEK_API_KEY")
 
 
-def _latest_markdown() -> Path:
-    """选取 2.sunrich 目录下“编号最大”的 Markdown 文稿（仅按序号，不回退 mtime）。"""
+def _markdown_for(video_path: Optional[str] = None) -> Path:
+    """按待发布视频匹配同名 Markdown 文稿；未提供时回退到“编号最大”的文稿。
+
+    视频与文稿同名（仅扩展名不同），例如
+    ``0503_中国为什么消费这么差？最新诺奖早就给了答案.mp4`` 对应
+    ``2.sunrich/0503_中国为什么消费这么差？最新诺奖早就给了答案.md``。
+    """
+    if video_path:
+        stem = Path(video_path).stem
+        candidate = SUNRICH_DIR / f"{stem}.md"
+        if candidate.exists():
+            return candidate
+        # 兼容带后缀差异的情况（例如 .720.mp4），用序号前缀再匹配一次。
+        prefix_match = re.match(r"^(\d+)", stem)
+        if prefix_match:
+            prefix = prefix_match.group(1)
+            matches = sorted(SUNRICH_DIR.glob(f"{prefix}_*.md"))
+            if len(matches) == 1:
+                return matches[0]
+
     files = list(SUNRICH_DIR.glob("*.md"))
     if not files:
         raise FileNotFoundError(f"{SUNRICH_DIR} 中没有 Markdown 文稿")
@@ -219,12 +237,14 @@ def _fallback_summary(intro: str, topics: str, max_chars: int) -> Tuple[str, str
     return summary, topics_str
 
 
-def generate_summary_and_topics(max_chars: int = MAX_CHARS) -> Tuple[str, str]:
+def generate_summary_and_topics(
+    max_chars: int = MAX_CHARS, video_path: Optional[str] = None
+) -> Tuple[str, str]:
     """返回 (简介摘要, 话题串)。
     要求必须调用 DeepSeek 生成；若未配置或调用失败，则直接报错，不做本地兜底。
     """
 
-    latest = _latest_markdown()
+    latest = _markdown_for(video_path)
     intro, topics = _extract_sections(latest.read_text(encoding="utf-8"))
     if not intro:
         raise ValueError("未在文稿中找到 '## 简介' 段落")

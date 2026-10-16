@@ -77,6 +77,7 @@ with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     cfg = {**DEFAULT_CONFIG, **json.load(f)}
 
 def load_speech_keys(config):
+    """读取 Speech Key 列表：环境变量 > speechKeys > 旧版单个 speechKey。"""
     env_keys = os.environ.get("AZURE_SPEECH_KEYS", "").strip()
     if env_keys:
         candidates = re.split(r"[,;\n]+", env_keys)

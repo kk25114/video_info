@@ -719,21 +719,25 @@ def _slug(value: str) -> str:
 
 
 def _placements(materials: list[dict[str, Any]], duration: float | None) -> list[dict[str, Any]]:
-    """生成不遮挡底部字幕的时间和位置。"""
-    positions = ["top-right", "top-left", "center-right", "center-left", "top-right", "top-left"]
+    """生成不遮挡底部字幕的时间和位置。
+
+    默认统一居中显示：素材按 0.72 缩放后水平、垂直居中，位于画面中部，
+    与底部字幕（MarginV=22）保持距离。
+    """
+    positions = ["center"]
     count = len(materials)
     # 0499 这类汽车文章按语义段落布置图片，使素材与旁白大致同步。
     automotive_rules = [
-        ("断裂", 12.0, "top-right"),
-        ("刹车踏板", 12.0, "top-right"),
-        ("紧急制动", 12.0, "top-right"),
-        ("刹车踏板", 140.0, "top-left"),
-        ("生产线", 330.0, "center-left"),
-        ("耐久测试", 470.0, "top-right"),
-        ("durability", 470.0, "top-right"),
-        ("assembly line", 330.0, "center-left"),
-        ("brake pedal", 140.0, "top-left"),
-        ("brake", 12.0, "top-right"),
+        ("断裂", 12.0, "center"),
+        ("刹车踏板", 12.0, "center"),
+        ("紧急制动", 12.0, "center"),
+        ("刹车踏板", 140.0, "center"),
+        ("生产线", 330.0, "center"),
+        ("耐久测试", 470.0, "center"),
+        ("durability", 470.0, "center"),
+        ("assembly line", 330.0, "center"),
+        ("brake pedal", 140.0, "center"),
+        ("brake", 12.0, "center"),
     ]
     each = min(58.0, max(24.0, ((duration or 300.0) - 40.0) / max(count, 1) - 8.0))
     if duration and duration > 0:
@@ -755,11 +759,14 @@ def _placements(materials: list[dict[str, Any]], duration: float | None) -> list
             rule_key, planned_start, planned_position = matched
             used_rules.add(rule_key)
         else:
-            planned_start, planned_position = (fallback_starts[index] if fallback_starts else None), positions[index % len(positions)]
+            planned_start = fallback_starts[index] if fallback_starts else None
+            planned_position = positions[index % len(positions)]
         item: dict[str, Any] = {
             "position": planned_position,
             "duration_seconds": round(each, 3),
-            "scale": 0.72,
+            # 与原文件名规则一致：等比缩放到画面框内（force_original_aspect_ratio=decrease），
+            # 配合 position=center，素材居中显示且不与底部字幕重叠。
+            "scale": 0.0,
         }
         if duration and duration > 0:
             max_start = max(duration - each, 0.0)
@@ -786,6 +793,39 @@ def _placements(materials: list[dict[str, Any]], duration: float | None) -> list
             result[index]["start_seconds"] = round(start, 3)
             next_start = max(0.0, start - gap)
     return result
+
+
+def _mmss(seconds: float) -> str:
+    """把秒数编码成原来的文件名时间码，例如 10s -> ``010``、610s -> ``1010``。"""
+    minutes, secs = divmod(int(round(max(0.0, seconds))), 60)
+    return f"{minutes}{secs:02d}"
+
+
+def _apply_timecode_names(materials: list[dict[str, Any]], output_dir: Path, duration: float) -> None:
+    """把素材重命名为原有的“起始时间-总时长”格式，例如 ``010-1010.jpg``。
+
+    该格式与 build.py 的文件名规则兼容：起点/总长的比值决定出现时间，
+    并且默认居中显示。
+    """
+    if not duration or duration <= 0:
+        return
+    total_code = _mmss(duration)
+    used: set[str] = set()
+    for material in materials:
+        old_path = output_dir / str(material.get("file", ""))
+        if not old_path.is_file():
+            continue
+        start = float(material.get("start_seconds", 0.0) or 0.0)
+        new_name = f"{_mmss(start)}-{total_code}.jpg"
+        suffix = 1
+        while new_name in used or (output_dir / new_name).exists() and (output_dir / new_name) != old_path:
+            suffix += 1
+            new_name = f"{_mmss(start)}-{total_code}-{suffix}.jpg"
+        used.add(new_name)
+        new_path = output_dir / new_name
+        if new_path != old_path:
+            old_path.replace(new_path)
+        material["file"] = new_name
 
 
 def search_and_download(
@@ -988,6 +1028,10 @@ def search_and_download(
     placements = _placements(materials, duration)
     for material, placement in zip(materials, placements):
         material.update(placement)
+
+    # 沿用原有素材命名习惯：起始时间-总时长（mmss-mmss），例如 010-1010.jpg。
+    if duration and duration > 0:
+        _apply_timecode_names(materials, output_dir, duration)
 
     manifest = {
         "version": 1,

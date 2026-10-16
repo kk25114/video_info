@@ -76,7 +76,7 @@ YTDLP_DOWNLOAD_RETRIES = os.environ.get('YTDLP_DOWNLOAD_RETRIES', '10').strip() 
 YTDLP_FRAGMENT_RETRIES = os.environ.get('YTDLP_FRAGMENT_RETRIES', '10').strip() or '10'
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_COMPLETIONS_URL = f"{DEEPSEEK_BASE_URL}/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = "deepseek-flash"
 
 # FunASR 模型缓存目录。使用用户目录，避免把运行账号写死为某个用户名。
 FUNASR_MODEL_CACHE_ROOT = Path(

@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = REPO_ROOT / "config.json"
 DEFAULT_CONTENT_DIR = REPO_ROOT / "2.sunrich"
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL = "deepseek-v4-flash"
+DEEPSEEK_MODEL = "deepseek-flash"
 
 
 def _load_api_key() -> Optional[str]:
