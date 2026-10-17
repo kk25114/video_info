@@ -10,7 +10,8 @@
 图片写入 ``mk_video/images``，同时生成 ``materials.json``。构建器会读取
 这个清单，按 start_seconds、duration_seconds、position 和 scale 放置素材。
 中文关键词优先搜索微信公众号文章；默认尝试使用本机 Chrome 进入公众号正文，
-滚动加载正文图片并下载。正文触发环境验证时自动回退到搜索结果中的文章封面。
+滚动加载正文图片并下载。正文触发环境验证时，如有图形桌面则打开可见 Chrome
+供手动验证；无图形桌面或验证未完成时回退到搜索结果中的文章封面。
 英文视觉关键词仍可补充 Openverse、Wikimedia Commons 和可选的 Bing 结果。
 下载前会根据标题、来源页面和文件名做相关性过滤。
 """
@@ -43,6 +44,16 @@ OPENVERSE_API = "https://api.openverse.org/v1/images/"
 WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 WECHAT_SEARCH_URL = "https://weixin.sogou.com/weixin"
 DEFAULT_CHROME_PATHS = ("/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser")
+
+
+def _prepare_visible_chrome() -> bool:
+    """确认可用的图形会话；兼容自动化进程未继承 WSLg DISPLAY 的情况。"""
+    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+        return True
+    if Path("/mnt/wslg/.X11-unix/X0").exists():
+        os.environ["DISPLAY"] = ":0"
+        return True
+    return False
 
 # 这些词通常代表误命中，优先在下载前剔除，避免把无关页面的图片放进成片。
 NEGATIVE_TERMS = (
@@ -86,9 +97,15 @@ def _read_article(path: Path) -> tuple[str, str, list[str], list[str]]:
     topics = []
     if topic_match:
         for line in topic_match.group(1).splitlines():
-            line = line.strip().lstrip("- ")
-            if line:
-                topics.append(line)
+            line = line.strip()
+            if not line:
+                continue
+            # 文档的“话题”标题后面可能没有下一个 Markdown 标题；只读取
+            # 紧随其后的标签列表，不能把正文段落也误当成主题标签。
+            match = re.match(r"^-\s*(#\S.*)$", line)
+            if not match:
+                break
+            topics.append(match.group(1).strip())
 
     body = text
     if "---" in body:
@@ -719,7 +736,7 @@ def _slug(value: str) -> str:
 
 
 def _placements(materials: list[dict[str, Any]], duration: float | None) -> list[dict[str, Any]]:
-    """生成不遮挡底部字幕的时间和位置。
+    """生成不遮挡底部字幕的时间和位置；每张素材默认显示 10 秒。
 
     默认统一居中显示：素材按 0.72 缩放后水平、垂直居中，位于画面中部，
     与底部字幕（MarginV=22）保持距离。
@@ -739,7 +756,7 @@ def _placements(materials: list[dict[str, Any]], duration: float | None) -> list
         ("brake pedal", 140.0, "center"),
         ("brake", 12.0, "center"),
     ]
-    each = min(58.0, max(24.0, ((duration or 300.0) - 40.0) / max(count, 1) - 8.0))
+    each = 10.0
     if duration and duration > 0:
         fallback_starts = [
             max(8.0, (duration - each) * i / max(count - 1, 1))
@@ -840,6 +857,10 @@ def search_and_download(
     use_wechat_body: bool,
     wechat_headful: bool,
 ) -> Path:
+    if wechat_headful and not _prepare_visible_chrome():
+        print("⚠️ 未检测到可用图形会话，将以无界面方式搜索")
+        wechat_headful = False
+
     title, intro, topics, paragraphs = _read_article(article)
     queries = _query_terms(title, intro, topics, paragraphs)
     if not queries:
@@ -953,6 +974,21 @@ def search_and_download(
                         candidate,
                         max_images=max(1, min(4, max_materials - len(new_materials))),
                     )
+                    if body_status == "verification_required" and not wechat_headful and _prepare_visible_chrome():
+                        # 先用无界面模式抓取；只有公众号要求验证时，才弹出可交互 Chrome。
+                        body_browser.close()
+                        body_browser = None
+                        try:
+                            body_browser = _WechatBodyBrowser(headless=False).start()
+                            print("🌐 正文触发环境验证，已打开可见 Chrome；请在窗口中完成验证")
+                            body_urls, body_status = body_browser.extract(
+                                candidate,
+                                max_images=max(1, min(4, max_materials - len(new_materials))),
+                            )
+                        except Exception as exc:
+                            body_browser_failed = True
+                            body_browser = None
+                            print(f"⚠️ 无法启动可见 Chrome，回退封面：{exc}", file=sys.stderr)
                     candidate["article_fetch_status"] = body_status
                     if body_status not in ("ok", "body_images_not_found") and body_status not in body_status_logged:
                         body_status_logged.add(body_status)
@@ -1068,7 +1104,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--wechat-headful",
         action="store_true",
-        help="用可见 Chrome 读取公众号正文；适合手动完成页面验证后继续",
+        help="从开始就用可见 Chrome 读取公众号正文；验证触发时默认会自动尝试可见 Chrome",
     )
     return parser
 

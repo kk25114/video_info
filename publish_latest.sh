@@ -53,3 +53,11 @@ env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u AL
   --success-text "发布成功" \
   --slow-mo 200 \
   --screenshot /home/github/video_info/douyin_playwright/test/latest.png
+
+# 发布脚本只有检测到抖音“发布成功”提示才返回成功；失败时 set -e 会在此之前退出，
+# 因此素材只会在确认发布成功后清理，失败重试仍可保留本次图片。
+IMAGE_DIR="/home/github/video_info/mk_video/images"
+if [[ -d "$IMAGE_DIR" ]]; then
+  find "$IMAGE_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  echo "🧹 抖音发布成功，已清空素材目录：$IMAGE_DIR"
+fi

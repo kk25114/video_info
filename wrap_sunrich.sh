@@ -137,12 +137,25 @@ done
 
 # ---------- 5. 为即将发布的最新文稿搜索图片素材 ----------
 if [[ -n "$LATEST_MD" && -n "$LATEST_WAV" ]]; then
+  IMAGE_DIR="$SAVE_DIR/images"
+  if [[ -d "$IMAGE_DIR" ]]; then
+    echo "🧹 清理旧素材目录，避免上一条视频的图片混入本次生成..."
+    find "$IMAGE_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  fi
+  mkdir -p "$IMAGE_DIR"
+
   SEARCH_ARGS=(
     --article "$LATEST_MD"
-    --output-dir "$SAVE_DIR/images"
+    --output-dir "$IMAGE_DIR"
     --clean
     --max-materials 5
   )
+
+  # 可显式要求从搜索开始使用可见 Chrome；默认只在遇到环境验证时打开。
+  if [[ "${WECHAT_HEADFUL:-0}" == "1" ]]; then
+    SEARCH_ARGS+=(--wechat-headful)
+    echo "🌐 使用可见 Chrome；如公众号要求验证，可在窗口中手动完成"
+  fi
 
   # 语音时长近似成片时长，用于安排素材的出现时间。
   if AUDIO_DURATION=$(/usr/bin/ffprobe -v error -show_entries format=duration \
