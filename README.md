@@ -131,20 +131,28 @@ python3 mk_video/search_materials.py \
 python3 mk_video/build.py
 ```
 
-素材和 `materials.json` 保存在 `mk_video/images/`。中文关键词优先搜索微信公众号文章，
-脚本默认启动 WSL Chrome 打开文章正文，滚动读取 `#js_content` 中的懒加载图片并下载；
-如果公众号要求环境验证，则记录状态并回退到搜索结果页的文章封面。英文视觉关键词仍可补充 Openverse/Wikimedia。
+素材和 `materials.json` 保存在 `mk_video/images/`。脚本根据文稿生成新闻关键词，
+只通过搜狗微信公众号索引搜索，按相关性选择文章，再调用 **Windows 默认浏览器**
+打开正文，滚动读取 `#js_content` 中的懒加载图片并下载。当前默认浏览器为
+`/mnt/c/Program Files/Google/Chrome/Application/chrome.exe`。
+Playwright 通过本机 CDP 管道连接 Windows 浏览器；素材抓取不依赖 WSL 的图形会话。
+搜索结果数量、候选文章和正文抓取状态另存为 `images/search_results.json`。
 清单记录文章标题、公众号、搜索来源、许可信息、开始时间、显示时长、缩放比例和画面位置；
 运行 `build.py` 会按这些设置叠加图片。微信公众号图片的授权状态记为 `unknown`，
 发布前应检查素材和使用权限。添加 `--clean` 只会删除上次清单列出的下载素材；
-确实需要更多候选时可追加 `--include-bing`，并检查 `materials.json`。
+图片沿用 `010-1010.jpg` 这类时间码命名，默认居中显示 10 秒。
 
-如果需要人工完成公众号页面验证，可使用可见浏览器模式：
+浏览器始终可见，使用 `%LOCALAPPDATA%\VideoInfo\WechatBrowser\<浏览器名>`
+固定配置目录保存 Cookie 和验证状态。Chrome 的远程调试需要专用数据目录，
+因此这个会话与日常浏览器配置分开；首次使用可能需要在这个 Windows 窗口中验证。
+相关限制见 [Chrome 官方说明](https://developer.chrome.com/blog/remote-debugging-port)。
+遇到验证最多等待一次（120 秒），未完成则保留页面并记录失败，不反复启动浏览器，
+也不自动下载封面或公共图库图片替代正文素材。只有显式要求封面时才使用：
 
 ```bash
 python3 mk_video/search_materials.py \
   --article '2.sunrich/0499_懂车帝也被解决了？.md' \
-  --wechat-headful
+  --no-wechat-body
 ```
 
 ### 4. 日常抖音发布流程

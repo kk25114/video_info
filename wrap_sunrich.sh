@@ -151,11 +151,7 @@ if [[ -n "$LATEST_MD" && -n "$LATEST_WAV" ]]; then
     --max-materials 5
   )
 
-  # 可显式要求从搜索开始使用可见 Chrome；默认只在遇到环境验证时打开。
-  if [[ "${WECHAT_HEADFUL:-0}" == "1" ]]; then
-    SEARCH_ARGS+=(--wechat-headful)
-    echo "🌐 使用可见 Chrome；如公众号要求验证，可在窗口中手动完成"
-  fi
+  echo "🌐 公众号正文使用 Windows 默认浏览器，并复用固定的验证会话"
 
   # 语音时长近似成片时长，用于安排素材的出现时间。
   if AUDIO_DURATION=$(/usr/bin/ffprobe -v error -show_entries format=duration \

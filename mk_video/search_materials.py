@@ -9,23 +9,19 @@
 
 图片写入 ``mk_video/images``，同时生成 ``materials.json``。构建器会读取
 这个清单，按 start_seconds、duration_seconds、position 和 scale 放置素材。
-中文关键词优先搜索微信公众号文章；默认尝试使用本机 Chrome 进入公众号正文，
-滚动加载正文图片并下载。正文触发环境验证时，如有图形桌面则打开可见 Chrome
-供手动验证；无图形桌面或验证未完成时回退到搜索结果中的文章封面。
-英文视觉关键词仍可补充 Openverse、Wikimedia Commons 和可选的 Bing 结果。
-下载前会根据标题、来源页面和文件名做相关性过滤。
+通过搜狗微信搜索公众号文章，调用 Windows 默认浏览器打开正文，
+滚动加载正文图片并下载。复用固定的 Windows 配置目录保存验证状态。
+正文触发验证时只等待一次并保留页面，不自动混用封面或通用图库素材。
+下载前会根据公众号文章标题和摘要做相关性过滤。
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import html
 import io
 import json
-import os
 import re
-import shutil
 import sys
 import time
 from pathlib import Path
@@ -36,24 +32,16 @@ import requests
 from PIL import Image
 from bs4 import BeautifulSoup
 
+if __package__:
+    from .windows_browser import WindowsBrowser
+else:
+    from windows_browser import WindowsBrowser
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "mk_video" / "images"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
-OPENVERSE_API = "https://api.openverse.org/v1/images/"
-WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 WECHAT_SEARCH_URL = "https://weixin.sogou.com/weixin"
-DEFAULT_CHROME_PATHS = ("/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser")
-
-
-def _prepare_visible_chrome() -> bool:
-    """确认可用的图形会话；兼容自动化进程未继承 WSLg DISPLAY 的情况。"""
-    if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-        return True
-    if Path("/mnt/wslg/.X11-unix/X0").exists():
-        os.environ["DISPLAY"] = ":0"
-        return True
-    return False
 
 # 这些词通常代表误命中，优先在下载前剔除，避免把无关页面的图片放进成片。
 NEGATIVE_TERMS = (
@@ -158,25 +146,11 @@ def _query_terms(title: str, intro: str, topics: list[str], paragraphs: list[str
             if len(simplified) >= 4 and not legal_case:
                 terms.append(" ".join((simplified[0], simplified[1], simplified[3])))
             terms.append(" ".join(simplified[:3]))
-    # 针对汽车安全类文稿提供稳定的语义扩展，通用文稿仍由标题/话题驱动。
-    corpus = f"{title} {intro} {' '.join(clean_topics)}".lower()
-    automotive = any(k in corpus for k in ("尊界", "刹车", "汽车", "车辆", "车企"))
-    if automotive:
-        terms.extend(
-            [
-                "automotive test track car photo",
-                "car braking test",
-                "car assembly line",
-                "electric car factory",
-                "vehicle durability test Range Rover",
-                "automotive safety test vehicle",
-            ]
-        )
-    elif title:
+    # 保持文档的新闻主题，不再自动扩展为汽车工厂等通用图库关键词。
+    if title:
         terms.append(title)
     elif paragraphs:
-        # 没有标题时仍保留一个可搜索的主题，避免返回空查询。
-        terms.append("relevant documentary photo")
+        terms.append(paragraphs[0][:30])
 
     result: list[str] = []
     seen: set[str] = set()
@@ -186,136 +160,6 @@ def _query_terms(title: str, intro: str, topics: list[str], paragraphs: list[str
             seen.add(term)
             result.append(term)
     return result
-
-
-def _openverse_images(session: requests.Session, query: str, limit: int) -> list[dict[str, str]]:
-    response = session.get(
-        OPENVERSE_API,
-        params={"q": query, "page_size": min(max(limit, 1), 20)},
-        headers={"Accept": "application/json"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    results: list[dict[str, str]] = []
-    for data in payload.get("results", []):
-        image_url = str(data.get("url") or "").strip()
-        thumb_url = str(data.get("thumbnail") or "").strip()
-        page_url = str(data.get("foreign_landing_url") or data.get("landing_url") or "").strip()
-        if not image_url and not thumb_url:
-            continue
-        tags = data.get("tags") or []
-        keywords = " ".join(
-            str(tag.get("name") or "").strip()
-            for tag in tags
-            if isinstance(tag, dict) and str(tag.get("name") or "").strip()
-        )
-        results.append(
-            {
-                "image_url": image_url,
-                "thumbnail_url": thumb_url,
-                "page_url": page_url,
-                "title": str(data.get("title") or "").strip(),
-                "description": str(data.get("description") or "").strip(),
-                "keywords": keywords,
-                "creator": str(data.get("creator") or "").strip(),
-                "license": str(data.get("license") or "").strip(),
-                "license_url": str(data.get("license_url") or "").strip(),
-                "source": "openverse",
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
-
-
-def _wikimedia_images(session: requests.Session, query: str, limit: int) -> list[dict[str, str]]:
-    response = session.get(
-        WIKIMEDIA_API,
-        params={
-            "action": "query",
-            "generator": "search",
-            "gsrsearch": query,
-            "gsrnamespace": 6,
-            "gsrlimit": min(max(limit, 1), 20),
-            "prop": "imageinfo",
-            "iiprop": "url|mime|size|extmetadata",
-            "iiurlwidth": 1280,
-            "format": "json",
-            "formatversion": "2",
-        },
-        headers={"Accept": "application/json"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    results: list[dict[str, str]] = []
-    for data in payload.get("query", {}).get("pages", []):
-        info = (data.get("imageinfo") or [{}])[0]
-        image_url = str(info.get("thumburl") or info.get("url") or "").strip()
-        page_url = str(info.get("descriptionurl") or "").strip()
-        title = str(data.get("title") or "").removeprefix("File:").strip()
-        metadata = info.get("extmetadata") or {}
-        license_name = metadata.get("LicenseShortName", {}).get("value", "")
-        creator = metadata.get("Artist", {}).get("value", "")
-        description = metadata.get("ImageDescription", {}).get("value", "")
-        categories = metadata.get("Categories", {}).get("value", "")
-        if not image_url:
-            continue
-        results.append(
-            {
-                "image_url": image_url,
-                "thumbnail_url": "",
-                "page_url": page_url,
-                "title": title,
-                "description": str(description),
-                "keywords": str(categories),
-                "creator": str(creator),
-                "license": str(license_name),
-                "license_url": page_url,
-                "source": "wikimedia",
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
-
-
-def _bing_images(session: requests.Session, query: str, limit: int) -> list[dict[str, str]]:
-    response = session.get(
-        "https://www.bing.com/images/search",
-        params={"q": query, "form": "HDRSC2", "first": 1},
-        timeout=30,
-    )
-    response.raise_for_status()
-    soup = BeautifulSoup(response.text, "html.parser")
-    results: list[dict[str, str]] = []
-    for node in soup.select("a.iusc"):
-        raw = html.unescape(node.get("m", ""))
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        image_url = str(data.get("murl") or "").strip()
-        thumb_url = str(data.get("turl") or "").strip()
-        page_url = str(data.get("purl") or "").strip()
-        if not image_url and not thumb_url:
-            continue
-        results.append(
-            {
-                "image_url": image_url,
-                "thumbnail_url": thumb_url,
-                "page_url": page_url,
-                "title": str(data.get("t") or "").strip(),
-                "description": str(data.get("desc") or "").strip(),
-                "keywords": str(data.get("pt") or "").strip(),
-                "source": "bing",
-                "license": "",
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
 
 
 def _wechat_images(session: requests.Session, query: str, limit: int) -> list[dict[str, str]]:
@@ -401,22 +245,22 @@ def _resolve_wechat_article(session: requests.Session, url: str) -> tuple[str, s
 
 
 class _WechatBodyBrowser:
-    """使用本机 Chrome 读取公众号正文中的懒加载图片地址。"""
+    """使用可见的 Windows 默认浏览器读取公众号正文图片。"""
 
     def __init__(
         self,
         *,
-        headless: bool = True,
         timeout_ms: int = 60_000,
         verification_wait_seconds: int = 120,
     ):
-        self.headless = headless
         self.timeout_ms = timeout_ms
         self.verification_wait_seconds = max(0, verification_wait_seconds)
         self._playwright = None
         self._browser = None
         self._context = None
         self._page = None
+        self._windows = None
+        self._keep_page = False
 
     def start(self) -> "_WechatBodyBrowser":
         try:
@@ -424,30 +268,18 @@ class _WechatBodyBrowser:
         except ImportError as exc:
             raise RuntimeError("未安装 Playwright，无法读取公众号正文") from exc
 
-        configured = os.environ.get("VIDEO_INFO_CHROME_PATH", "").strip()
-        browser_path = configured or next(
-            (path for path in DEFAULT_CHROME_PATHS if Path(path).exists()),
-            shutil.which("google-chrome") or shutil.which("chromium") or "",
-        )
-        if not browser_path:
-            raise RuntimeError("未找到 WSL Chrome；可设置 VIDEO_INFO_CHROME_PATH")
-
-        self._playwright = sync_playwright().start()
         try:
-            self._browser = self._playwright.chromium.launch(
-                headless=self.headless,
-                executable_path=browser_path,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            self._windows = WindowsBrowser().start()
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.connect_over_cdp(
+                self._windows.endpoint, timeout=20_000,
             )
-            self._context = self._browser.new_context(
-                locale="zh-CN",
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-                ),
-            )
+            self._context = self._browser.contexts[0]
             self._page = self._context.new_page()
             self._page.set_default_timeout(15_000)
+            if self._page.evaluate("navigator.platform") != "Win32":
+                raise RuntimeError("素材浏览器不是 Windows 浏览器，已停止抓取")
+            print(f"🌐 Windows 默认浏览器：{self._windows.info['executable']}", flush=True)
         except Exception:
             self.close()
             raise
@@ -464,11 +296,15 @@ class _WechatBodyBrowser:
             self._page.goto(article_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
             self._page.wait_for_timeout(1_200)
             body_text = self._page.locator("body").inner_text(timeout=5_000)
-            if any(term in body_text for term in ("环境异常", "完成验证", "去验证")):
-                if not self.headless and self.verification_wait_seconds:
+            if not self._page.locator("#js_content").count() and any(
+                term in body_text for term in ("环境异常", "完成验证", "去验证")
+            ):
+                self._keep_page = True
+                if self.verification_wait_seconds:
                     print(
-                        "⚠️ Chrome 页面需要验证，请在可见窗口中完成验证；"
-                        f"最多等待 {self.verification_wait_seconds} 秒"
+                        "⚠️ 公众号需要验证，请在 Windows 浏览器中完成；"
+                        f"最多等待一次（{self.verification_wait_seconds} 秒）",
+                        flush=True,
                     )
                     deadline = time.monotonic() + self.verification_wait_seconds
                     while time.monotonic() < deadline:
@@ -476,8 +312,9 @@ class _WechatBodyBrowser:
                         if self._page.locator("#js_content").count():
                             break
                     body_text = self._page.locator("body").inner_text(timeout=5_000)
-                if any(term in body_text for term in ("环境异常", "完成验证", "去验证")):
+                if not self._page.locator("#js_content").count():
                     return [], "verification_required"
+                self._keep_page = False
 
             body = self._page.locator("#js_content")
             body.wait_for(state="attached", timeout=10_000)
@@ -540,22 +377,30 @@ class _WechatBodyBrowser:
                 return None
             with Image.open(io.BytesIO(raw)) as image:
                 image.verify()
+                if image.width < 320 or image.height < 180:
+                    return None
+                if max(image.size) / max(1, min(image.size)) > 4.5:
+                    return None
             return raw
         except Exception:
             return None
 
     def close(self) -> None:
-        for item in (self._context, self._browser):
-            if item is not None:
-                try:
-                    item.close()
-                except Exception:
-                    pass
+        # 只关闭脚本自己的标签页，保留 Windows 浏览器和持久配置。
+        # 验证未完成时保留页面，便于用户手动处理后在下次任务复用。
+        if self._page is not None and not self._keep_page:
+            try:
+                self._page.close()
+            except Exception:
+                pass
         if self._playwright is not None:
             try:
                 self._playwright.stop()
             except Exception:
                 pass
+        if self._windows is not None:
+            self._windows.close()
+            self._windows = None
         self._page = None
         self._context = None
         self._browser = None
@@ -567,9 +412,6 @@ def _metadata_text(candidate: dict[str, str]) -> str:
     fields = (
         candidate.get("title", ""),
         candidate.get("description", ""),
-        candidate.get("keywords", ""),
-        candidate.get("page_url", ""),
-        candidate.get("image_url", ""),
     )
     return re.sub(r"\s+", " ", " ".join(str(value) for value in fields)).strip().lower()
 
@@ -595,7 +437,7 @@ def _term_in_text(text: str, term: str) -> bool:
     width = len(term_tokens)
     if any(token_list[i : i + width] == term_tokens for i in range(len(token_list) - width + 1)):
         return True
-    # Openverse 标签有时会把多个词压成一个 token，例如 carbraketesting。
+    # 元数据有时会把多个词压成一个 token，例如 carbraketesting。
     compact_term = "".join(term_tokens)
     return any(compact_term in token for token in token_list)
 
@@ -606,6 +448,8 @@ def _has_any(text: str, terms: tuple[str, ...]) -> bool:
 
 def _candidate_score(candidate: dict[str, str], query: str) -> int:
     """按候选自身元数据打分，返回 0 表示拒绝。"""
+    if candidate.get("source") != "wechat":
+        return 0
     text = _metadata_text(candidate)
     if _has_any(text, NEGATIVE_TERMS):
         return 0
@@ -624,8 +468,7 @@ def _candidate_score(candidate: dict[str, str], query: str) -> int:
 
     # 查询本身只描述了汽车刹车时，必须在结果元数据中同时出现刹车语义和车辆语义。
     if _has_any(query_lower, ("brake", "braking", "pedal", "刹车", "制动")):
-        # Openverse 的“car brake testing”结果中有一张仅包含警示牌的照片；
-        # 它可作搜索命中，但不适合直接叠入视频画面。
+        # 仅包含警示牌的搜索命中不适合直接叠入视频画面。
         if _has_any(text, ("sign", "warning sign", "postcard")):
             return 0
         return 100 + int(vehicle) * 20 + int(test) * 10 if brake and vehicle else 0
@@ -653,7 +496,7 @@ def _candidate_score(candidate: dict[str, str], query: str) -> int:
         return 0
     evidence_text = re.sub(
         r"\s+", " ",
-        " ".join(str(candidate.get(field, "")) for field in ("title", "description", "keywords")),
+        " ".join(str(candidate.get(field, "")) for field in ("title", "description")),
     ).lower()
     hits = sum(1 for token in query_tokens if token in evidence_text)
     # Require two query concepts when the query contains multiple concepts;
@@ -661,10 +504,6 @@ def _candidate_score(candidate: dict[str, str], query: str) -> int:
     # not enough to establish that the image belongs to this news event.
     minimum_hits = 1 if len(query_tokens) == 1 else 2
     if hits < minimum_hits:
-        return 0
-    # 中文新闻素材优先只接受公众号结果；Openverse/Wikimedia 的通用图片
-    # 不具备事件上下文，容易把无关图片混入成片。
-    if candidate.get("source") != "wechat":
         return 0
     return 30 + hits * 20
 
@@ -853,14 +692,8 @@ def search_and_download(
     duration: float | None,
     clean: bool,
     max_bytes: int,
-    include_bing: bool,
     use_wechat_body: bool,
-    wechat_headful: bool,
 ) -> Path:
-    if wechat_headful and not _prepare_visible_chrome():
-        print("⚠️ 未检测到可用图形会话，将以无界面方式搜索")
-        wechat_headful = False
-
     title, intro, topics, paragraphs = _read_article(article)
     queries = _query_terms(title, intro, topics, paragraphs)
     if not queries:
@@ -909,25 +742,21 @@ def search_and_download(
     }
     candidates: list[tuple[str, dict[str, str]]] = []
     result_sets: list[tuple[str, list[dict[str, str]]]] = []
+    search_records: list[dict[str, Any]] = []
     for query in queries:
         found: list[dict[str, str]] = []
-        source_searches = [("微信公众号", _wechat_images)]
-        # 中文新闻关键词应当只查公众号索引，避免再混入不具备事件上下文的
-        # 通用图片站结果；英文视觉关键词仍可补充可授权的公共图库素材。
-        if not re.search(r"[\u4e00-\u9fff]", query):
-            source_searches.extend([
-                ("Openverse", _openverse_images),
-                ("Wikimedia", _wikimedia_images),
-            ])
-            if include_bing:
-                source_searches.append(("Bing", _bing_images))
-        for source_name, search in source_searches:
-            try:
-                result_limit = max(count_per_query, 10) if source_name == "微信公众号" else count_per_query
-                source_results = search(session, query, result_limit)
-                found.extend(item for item in source_results if _candidate_relevance(item, query))
-            except Exception as exc:
-                print(f"⚠️ {source_name} 搜索失败: {query}: {exc}", file=sys.stderr)
+        record: dict[str, Any] = {"query": query, "results": []}
+        search_records.append(record)
+        try:
+            source_results = _wechat_images(session, query, max(count_per_query, 10))
+            found = [item for item in source_results if _candidate_relevance(item, query)]
+            record["results"] = source_results
+            record["result_count"] = len(source_results)
+            record["relevant_count"] = len(found)
+            print(f"🔎 搜狗微信：{query} → {len(source_results)} 篇，相关 {len(found)} 篇", flush=True)
+        except Exception as exc:
+            record["error"] = str(exc)
+            print(f"⚠️ 微信公众号搜索失败: {query}: {exc}", file=sys.stderr)
         found.sort(key=lambda item: _candidate_sort_key(item, query), reverse=True)
         result_sets.append((query, found))
 
@@ -964,41 +793,28 @@ def search_and_download(
             if use_wechat_body and candidate.get("source") == "wechat" and not body_access_blocked:
                 if body_browser is None and not body_browser_failed:
                     try:
-                        body_browser = _WechatBodyBrowser(headless=not wechat_headful).start()
-                        print("🌐 已启动 Chrome，尝试读取公众号正文图片")
+                        body_browser = _WechatBodyBrowser().start()
                     except Exception as exc:
                         body_browser_failed = True
-                        print(f"⚠️ Chrome 正文抓取不可用，回退封面：{exc}", file=sys.stderr)
+                        candidate["article_fetch_status"] = "windows_browser_unavailable"
+                        print(f"⚠️ Windows 浏览器不可用，本次不使用封面或图库替代：{exc}", file=sys.stderr)
                 if body_browser is not None:
+                    print(f"📄 读取公众号正文：{candidate.get('title', '')}", flush=True)
                     body_urls, body_status = body_browser.extract(
                         candidate,
-                        max_images=max(1, min(4, max_materials - len(new_materials))),
+                        max_images=max(20, max_materials * 4),
                     )
-                    if body_status == "verification_required" and not wechat_headful and _prepare_visible_chrome():
-                        # 先用无界面模式抓取；只有公众号要求验证时，才弹出可交互 Chrome。
-                        body_browser.close()
-                        body_browser = None
-                        try:
-                            body_browser = _WechatBodyBrowser(headless=False).start()
-                            print("🌐 正文触发环境验证，已打开可见 Chrome；请在窗口中完成验证")
-                            body_urls, body_status = body_browser.extract(
-                                candidate,
-                                max_images=max(1, min(4, max_materials - len(new_materials))),
-                            )
-                        except Exception as exc:
-                            body_browser_failed = True
-                            body_browser = None
-                            print(f"⚠️ 无法启动可见 Chrome，回退封面：{exc}", file=sys.stderr)
                     candidate["article_fetch_status"] = body_status
                     if body_status not in ("ok", "body_images_not_found") and body_status not in body_status_logged:
                         body_status_logged.add(body_status)
-                        print(f"⚠️ 公众号正文抓取状态：{body_status}；后续候选将按回退策略处理")
+                        print(f"⚠️ 公众号正文抓取状态：{body_status}；不以封面或图库充当正文素材", flush=True)
                     if body_status == "verification_required":
                         # 不重复请求同一环境的验证页，也不尝试绕过验证。
                         body_access_blocked = True
                     targets.extend((url, True) for url in body_urls)
 
-            if not targets and candidate.get("image_url"):
+            # 只有显式使用 --no-wechat-body 时才允许下载搜索结果封面。
+            if not use_wechat_body and candidate.get("image_url"):
                 targets.append((str(candidate.get("image_url")), False))
                 if candidate.get("thumbnail_url"):
                     targets.append((str(candidate.get("thumbnail_url")), False))
@@ -1053,12 +869,18 @@ def search_and_download(
                         "height": height,
                     }
                 )
+                candidate["downloaded_images"] = int(candidate.get("downloaded_images", 0)) + 1
     finally:
         if body_browser is not None:
             body_browser.close()
+        report_path = output_dir / "search_results.json"
+        report_path.write_text(
+            json.dumps({"article": str(article), "searches": search_records}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     if not new_materials and not existing_materials:
-        raise RuntimeError("没有下载到可用图片素材")
+        raise RuntimeError(f"没有下载到可用公众号图片素材；搜索和正文状态见 {report_path}")
 
     materials = existing_materials + new_materials
     placements = _placements(materials, duration)
@@ -1095,16 +917,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-materials", type=int, default=5, help="最多下载图片数")
     parser.add_argument("--max-bytes", type=int, default=12 * 1024 * 1024, help="单张图片最大字节数")
     parser.add_argument("--clean", action="store_true", help="清理输出目录中的旧图片和 materials.json")
-    parser.add_argument("--include-bing", action="store_true", help="允许补充版权不明的 Bing 图片结果")
     parser.add_argument(
         "--no-wechat-body",
         action="store_true",
-        help="不打开 Chrome 抓取公众号正文，只使用搜索结果封面",
+        help="显式仅下载公众号搜索结果封面，不打开 Windows 浏览器读取正文",
     )
     parser.add_argument(
         "--wechat-headful",
         action="store_true",
-        help="从开始就用可见 Chrome 读取公众号正文；验证触发时默认会自动尝试可见 Chrome",
+        help="兼容旧参数；默认始终使用可见 Windows 浏览器读取公众号正文",
     )
     return parser
 
@@ -1120,9 +941,7 @@ def main(argv: list[str] | None = None) -> int:
             duration=args.video_duration,
             clean=args.clean,
             max_bytes=max(256 * 1024, args.max_bytes),
-            include_bing=args.include_bing,
             use_wechat_body=not args.no_wechat_body,
-            wechat_headful=args.wechat_headful,
         )
     except Exception as exc:
         print(f"❌ 素材搜索失败: {exc}", file=sys.stderr)
