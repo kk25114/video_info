@@ -106,6 +106,17 @@ def _read_article(path: Path) -> tuple[str, str, list[str], list[str]]:
     return title, intro, topics, paragraphs
 
 
+def _sanitize_unicode(value: Any) -> Any:
+    """替换网页响应中的孤立 surrogate，避免 JSON 清单无法写入 UTF-8。"""
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_sanitize_unicode(item) for item in value]
+    if isinstance(value, dict):
+        return {_sanitize_unicode(key): _sanitize_unicode(item) for key, item in value.items()}
+    return value
+
+
 def _query_terms(title: str, intro: str, topics: list[str], paragraphs: list[str]) -> list[str]:
     """提取少量可搜索的主题，避免把整篇文章发送给搜索引擎。"""
     clean_topics = [re.sub(r"^#", "", x) for x in topics]
@@ -748,7 +759,9 @@ def search_and_download(
         record: dict[str, Any] = {"query": query, "results": []}
         search_records.append(record)
         try:
-            source_results = _wechat_images(session, query, max(count_per_query, 10))
+            source_results = _sanitize_unicode(
+                _wechat_images(session, query, max(count_per_query, 10))
+            )
             found = [item for item in source_results if _candidate_relevance(item, query)]
             record["results"] = source_results
             record["result_count"] = len(source_results)

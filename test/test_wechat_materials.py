@@ -74,6 +74,23 @@ class WechatMaterialTests(unittest.TestCase):
         with Image.open(self.output / image["file"]) as saved:
             self.assertEqual(saved.size, (640, 480))
 
+    def test_orphan_surrogates_from_search_results_do_not_break_manifests(self):
+        self.candidate["description"] = "村庄人口减少调查 \ud83d"
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), "gray").save(raw, "JPEG")
+        browser = Mock()
+        browser.start.return_value = browser
+        browser.extract.return_value = (["https://mmbiz.qpic.cn/body.jpg"], "ok")
+        browser.download.return_value = raw.getvalue()
+
+        manifest_path = self.run_search(browser)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        report = json.loads((self.output / "search_results.json").read_text(encoding="utf-8"))
+        description = manifest["materials"][0]["description"]
+        report_description = report["searches"][0]["results"][0]["description"]
+        self.assertEqual(description, "村庄人口减少调查 ?")
+        self.assertEqual(report_description, description)
+
     def test_automotive_queries_do_not_expand_to_generic_stock_photos(self):
         queries = materials._query_terms("懂车帝这下麻烦了", "尊界汽车刹车踏板断裂", ["#尊界", "#刹车踏板"], [])
         self.assertTrue(queries)
