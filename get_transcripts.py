@@ -241,7 +241,8 @@ def build_youtube_audio_download_cmd(
     format_selector: str = YTDLP_AUDIO_FORMAT,
 ) -> list[str]:
     """构造音频下载命令，允许为兜底策略指定独立客户端和格式。"""
-    cmd = ['yt-dlp']
+    # Keep unrelated plugins from invoking unavailable local services.
+    cmd = ['yt-dlp', '--no-plugin-dirs']
     if with_cookies and cookies_args:
         cmd.extend(cookies_args)
     cmd.extend([

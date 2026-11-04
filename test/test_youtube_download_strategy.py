@@ -26,6 +26,7 @@ class YoutubeDownloadStrategyTests(unittest.TestCase):
 
         self.assertIn('--cookies', command)
         self.assertIn('/tmp/cookies.txt', command)
+        self.assertIn('--no-plugin-dirs', command)
         self.assertNotIn('--extractor-args', command)
 
     @patch('get_transcripts.get_youtube_po_token', return_value=None)
