@@ -267,7 +267,7 @@ def build_youtube_audio_download_strategies(
     audio_path: str,
     runtime_args: list[str],
 ) -> list[tuple[str, list[str]]]:
-    """返回音频下载策略；当前网络环境直接使用 mweb/18 兼容流。"""
+    """优先试 mweb 兼容流；其无可用格式时回退到默认 HTTPS 音频格式。"""
     return [
         (
             "兼容流(mweb/18,不带cookies)",
@@ -278,6 +278,15 @@ def build_youtube_audio_download_strategies(
                 [],
                 player_client='mweb',
                 format_selector=YTDLP_MWEB_FALLBACK_FORMAT,
+            ),
+        ),
+        (
+            "默认HTTPS音频格式",
+            build_youtube_audio_download_cmd(
+                video_url,
+                audio_path,
+                runtime_args,
+                [],
             ),
         ),
     ]

@@ -74,6 +74,116 @@ class WechatMaterialTests(unittest.TestCase):
         with Image.open(self.output / image["file"]) as saved:
             self.assertEqual(saved.size, (640, 480))
 
+    def test_right_click_image_save_keeps_source_and_cleans_its_temp_file(self):
+        temp_parent = self.root / "Temp"
+        save_directory = temp_parent / "VideoInfoWechatImages-test"
+        save_directory.mkdir(parents=True)
+        image_path = save_directory / "body.jpg"
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), "gray").save(raw, "JPEG")
+        image_path.write_bytes(raw.getvalue())
+        browser = Mock()
+        browser.start.return_value = browser
+        browser.open_article.return_value = {
+            "status": "ok",
+            "address": "https://mp.weixin.qq.com/s/article",
+            "images": [{"index": 2, "width": 640, "height": 480}],
+        }
+        browser.save_image.return_value = {"file_path": str(image_path), "image_index": 2}
+        reader = materials._WechatBodyBrowser(browser=browser).start()
+        manifest = json.loads(self.run_search(reader).read_text())
+        image = manifest["materials"][0]
+        self.assertEqual(image["source_url"], "https://mp.weixin.qq.com/s/article")
+        self.assertEqual(image["source_image_index"], 2)
+        self.assertEqual(image["image_url"], "")
+        self.assertEqual(image["capture_method"], "windows_image_save_as")
+        browser.save_image.assert_called_once_with(2)
+        self.assertFalse(save_directory.exists())
+
+    def test_image_save_failure_does_not_fall_back_to_cover(self):
+        browser = Mock()
+        browser.open_article.return_value = {
+            "status": "ok", "address": self.candidate["article_url"],
+            "images": [{"index": 2}],
+        }
+        browser.save_image.side_effect = RuntimeError("目标文章已切换")
+        reader = materials._WechatBodyBrowser(browser=browser)
+        with patch.object(materials, "_download_image") as download:
+            with self.assertRaisesRegex(RuntimeError, "没有下载到"):
+                self.run_search(reader)
+            download.assert_not_called()
+        report = json.loads((self.output / "search_results.json").read_text())
+        self.assertEqual(report["searches"][0]["results"][0]["article_fetch_status"], "image_save_failed")
+
+    def test_empty_http_search_uses_default_browser_results(self):
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), "gray").save(raw, "JPEG")
+        windows = Mock()
+        windows.start.return_value = windows
+        windows.search_wechat.return_value = [copy.deepcopy(self.candidate)]
+        body = Mock()
+        body.start.return_value = body
+        body.extract.return_value = (["https://mmbiz.qpic.cn/body.jpg"], "ok")
+        body.download.return_value = raw.getvalue()
+        with patch.object(materials, "_wechat_images", return_value=[]), \
+                patch.object(materials, "WindowsBrowser", return_value=windows), \
+                patch.object(materials, "_WechatBodyBrowser", return_value=body) as reader:
+            materials.search_and_download(self.article, self.output, 1, 1, 610, True, 1024 * 1024, True)
+        reader.assert_called_once_with(browser=windows)
+        windows.search_wechat.assert_called_once()
+        report = json.loads((self.output / "search_results.json").read_text())
+        self.assertEqual(report["searches"][0]["selected_search_source"], "windows_default_browser")
+
+    def test_searches_once_and_opens_only_the_top_relevant_article(self):
+        second = dict(
+            self.candidate,
+            title="乡村消亡现状调查",
+            article_url="https://mp.weixin.qq.com/s/second-article",
+            page_url="https://weixin.sogou.com/link?url=second",
+        )
+        browser = Mock()
+        browser.start.return_value = browser
+        browser.extract.return_value = (["https://mmbiz.qpic.cn/body.jpg"], "ok")
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), "gray").save(raw, "JPEG")
+        browser.download.return_value = raw.getvalue()
+        with patch.object(materials, "_query_terms", return_value=["乡村消亡", "留守老人"]), \
+                patch.object(materials, "_wechat_images", return_value=[copy.deepcopy(self.candidate), second]) as search, \
+                patch.object(materials, "_WechatBodyBrowser", return_value=browser):
+            materials.search_and_download(self.article, self.output, 6, 1, 610, True, 1024 * 1024, True)
+        search.assert_called_once()
+        browser.extract.assert_called_once()
+        self.assertEqual(browser.extract.call_args.args[0]["article_url"], self.candidate["article_url"])
+        report = json.loads((self.output / "search_results.json").read_text())
+        self.assertEqual(len(report["searches"]), 1)
+        self.assertEqual(report["searches"][0]["query"], "乡村消亡")
+        self.assertNotIn("article_fetch_status", report["searches"][0]["results"][1])
+
+    def test_search_results_do_not_open_each_article_before_selection(self):
+        response = Mock()
+        response.url = "https://weixin.sogou.com/weixin?type=2&query=%E4%B9%A1%E6%9D%91%E6%B6%88%E4%BA%A1"
+        response.text = """<ul class="news-list">
+          <li id="sogou_vr_1">
+            <h3><a href="/link?url=one">乡村消亡与留守老人</a></h3>
+            <div class="txt-info">村庄人口减少的实地调查</div>
+            <div class="all-time-y2">公众号甲</div>
+          </li>
+          <li id="sogou_vr_2">
+            <h3><a href="/link?url=two">乡村消亡现状调查</a></h3>
+            <div class="txt-info">人口变化</div>
+            <div class="all-time-y2">公众号乙</div>
+          </li>
+        </ul>"""
+        session = Mock()
+        session.get.return_value = response
+        with patch.object(materials, "_resolve_wechat_article") as resolve:
+            results = materials._wechat_images(session, "乡村消亡", 10)
+        resolve.assert_not_called()
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["page_url"], "https://weixin.sogou.com/link?url=one")
+        self.assertEqual(results[0]["article_url"], "")
+        self.assertEqual(results[0]["article_status"], "resolve_in_windows_browser")
+
     def test_orphan_surrogates_from_search_results_do_not_break_manifests(self):
         self.candidate["description"] = "村庄人口减少调查 \ud83d"
         raw = io.BytesIO()

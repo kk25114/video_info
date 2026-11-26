@@ -50,7 +50,7 @@ class YoutubeDownloadStrategyTests(unittest.TestCase):
         self.assertNotIn('--cookies', command)
 
     @patch('get_transcripts.get_youtube_po_token', return_value=None)
-    def test_audio_download_uses_only_mweb_compatibility_strategy(self, _token_mock):
+    def test_audio_download_falls_back_to_default_https_formats(self, _token_mock):
         strategies = build_youtube_audio_download_strategies(
             'https://www.youtube.com/watch?v=Sotw8i4nlgU',
             '/tmp/audio.mp3',
@@ -59,13 +59,17 @@ class YoutubeDownloadStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [description for description, _command in strategies],
-            ['兼容流(mweb/18,不带cookies)'],
+            ['兼容流(mweb/18,不带cookies)', '默认HTTPS音频格式'],
         )
         command = strategies[0][1]
         format_index = command.index('-f')
         self.assertEqual(command[format_index + 1], '18')
         self.assertNotIn('--cookies', command)
         self.assertNotIn('bestaudio', command)
+        fallback = strategies[1][1]
+        self.assertEqual(fallback[fallback.index('-f') + 1],
+                         'bestaudio[ext=m4a][protocol=https]/bestaudio[protocol=https]/bestaudio/18/best[ext=mp4][protocol=https]/best')
+        self.assertNotIn('--extractor-args', fallback)
 
     @patch('get_transcripts.get_youtube_po_token', return_value='token-value')
     def test_po_token_uses_client_and_gvs_scope(self, _token_mock):

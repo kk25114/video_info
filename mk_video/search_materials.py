@@ -9,9 +9,9 @@
 
 图片写入 ``mk_video/images``，同时生成 ``materials.json``。构建器会读取
 这个清单，按 start_seconds、duration_seconds、position 和 scale 放置素材。
-通过搜狗微信搜索公众号文章，调用 Windows 默认浏览器打开正文，
-滚动加载正文图片并下载。复用固定的 Windows 配置目录保存验证状态。
-正文触发验证时只等待一次并保留页面，不自动混用封面或通用图库素材。
+通过搜狗微信搜索一个主题；按相关性只打开一篇公众号文章。
+正文由默认浏览器打开，在正文区域定位图片，通过右键“图片另存为”保存图片。
+正文触发验证时保留页面，不自动混用封面或通用图库素材。
 下载前会根据公众号文章标题和摘要做相关性过滤。
 """
 
@@ -22,8 +22,8 @@ import hashlib
 import io
 import json
 import re
+import shutil
 import sys
-import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -174,7 +174,7 @@ def _query_terms(title: str, intro: str, topics: list[str], paragraphs: list[str
 
 
 def _wechat_images(session: requests.Session, query: str, limit: int) -> list[dict[str, str]]:
-    """搜索搜狗微信索引，同时解析可用的公众号正文地址。"""
+    """只解析搜狗结果列表；选中的文章由浏览器打开。"""
     if not re.search(r"[\u4e00-\u9fff]", query):
         return []
     response = session.get(
@@ -207,15 +207,13 @@ def _wechat_images(session: requests.Session, query: str, limit: int) -> list[di
         if original_host not in {"mmbiz.qpic.cn", "m.qpic.cn"}:
             # 只接受微信图片 CDN 原图；不把结果页中的任意外链当作微信素材。
             original_url = thumbnail_url
-        article_url, article_status = _resolve_wechat_article(session, page_url)
-
         results.append(
             {
                 "image_url": original_url,
                 "thumbnail_url": thumbnail_url if original_url != thumbnail_url else "",
                 "page_url": page_url,
-                "article_url": article_url,
-                "article_status": article_status,
+                "article_url": "",
+                "article_status": "resolve_in_windows_browser",
                 "search_url": response.url,
                 "title": title,
                 "description": summary,
@@ -256,136 +254,73 @@ def _resolve_wechat_article(session: requests.Session, url: str) -> tuple[str, s
 
 
 class _WechatBodyBrowser:
-    """使用可见的 Windows 默认浏览器读取公众号正文图片。"""
+    """在 Windows 默认浏览器中右键保存公众号正文图片。"""
 
-    def __init__(
-        self,
-        *,
-        timeout_ms: int = 60_000,
-        verification_wait_seconds: int = 120,
-    ):
-        self.timeout_ms = timeout_ms
-        self.verification_wait_seconds = max(0, verification_wait_seconds)
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
-        self._windows = None
-        self._keep_page = False
+    def __init__(self, *, browser: WindowsBrowser | None = None):
+        self._windows = browser
+        self._images: dict[str, int] = {}
+        self._candidate: dict[str, Any] = {}
+        self._save_failed = False
 
     def start(self) -> "_WechatBodyBrowser":
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as exc:
-            raise RuntimeError("未安装 Playwright，无法读取公众号正文") from exc
-
-        try:
-            self._windows = WindowsBrowser().start()
-            self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.connect_over_cdp(
-                self._windows.endpoint, timeout=20_000,
-            )
-            self._context = self._browser.contexts[0]
-            self._page = self._context.new_page()
-            self._page.set_default_timeout(15_000)
-            if self._page.evaluate("navigator.platform") != "Win32":
-                raise RuntimeError("素材浏览器不是 Windows 浏览器，已停止抓取")
-            print(f"🌐 Windows 默认浏览器：{self._windows.info['executable']}", flush=True)
-        except Exception:
-            self.close()
-            raise
+        if self._windows is None:
+            self._windows = WindowsBrowser()
+        self._windows.start()
         return self
 
     def extract(self, candidate: dict[str, str], max_images: int) -> tuple[list[str], str]:
-        """返回正文图片 URL 和状态；遇到验证页时只返回状态。"""
-        if self._page is None:
+        """定位正文图片，返回本次页面内的图片标识和访问状态。"""
+        self._images.clear()
+        self._candidate = candidate
+        self._save_failed = False
+        if self._windows is None:
             return [], "browser_not_started"
-        article_url = str(candidate.get("article_url") or "").strip()
-        if not article_url:
-            return [], str(candidate.get("article_status") or "article_url_missing")
+        page_url = str(candidate.get("page_url") or candidate.get("article_url") or "").strip()
+        if not page_url:
+            return [], "article_url_missing"
         try:
-            self._page.goto(article_url, wait_until="domcontentloaded", timeout=self.timeout_ms)
-            self._page.wait_for_timeout(1_200)
-            body_text = self._page.locator("body").inner_text(timeout=5_000)
-            if not self._page.locator("#js_content").count() and any(
-                term in body_text for term in ("环境异常", "完成验证", "去验证")
-            ):
-                self._keep_page = True
-                if self.verification_wait_seconds:
-                    print(
-                        "⚠️ 公众号需要验证，请在 Windows 浏览器中完成；"
-                        f"最多等待一次（{self.verification_wait_seconds} 秒）",
-                        flush=True,
-                    )
-                    deadline = time.monotonic() + self.verification_wait_seconds
-                    while time.monotonic() < deadline:
-                        self._page.wait_for_timeout(1_000)
-                        if self._page.locator("#js_content").count():
-                            break
-                    body_text = self._page.locator("body").inner_text(timeout=5_000)
-                if not self._page.locator("#js_content").count():
-                    return [], "verification_required"
-                self._keep_page = False
-
-            body = self._page.locator("#js_content")
-            body.wait_for(state="attached", timeout=10_000)
-            # 公众号图片通常使用 data-src 懒加载；滚动后再读取，兼容正文长图。
-            for _ in range(8):
-                self._page.evaluate("window.scrollBy(0, Math.max(window.innerHeight, 900))")
-                self._page.wait_for_timeout(350)
-            nodes = body.locator("img").evaluate_all(
-                """(imgs) => imgs.map((img) => ({
-                    src: img.getAttribute('src') || '',
-                    dataSrc: img.getAttribute('data-src') || '',
-                    dataOriginal: img.getAttribute('data-original') || '',
-                    dataLazy: img.getAttribute('data-lazy-src') || ''
-                }))"""
-            )
+            page = self._windows.open_article(page_url, str(candidate.get("title", "")))
         except Exception as exc:
+            candidate["article_fetch_error"] = str(exc)
             return [], f"browser_error:{type(exc).__name__}"
+        if page.get("status") != "ok":
+            return [], str(page.get("status") or "article_body_not_found")
+        article_url = str(page.get("address") or page_url)
+        if article_url.startswith("mp.weixin.qq.com/"):
+            article_url = "https://" + article_url
+        candidate["article_url"] = article_url
+        if page.get("title"):
+            candidate["title"] = str(page["title"])
+        for image in page.get("images", [])[:max(1, max_images)]:
+            index = int(image["index"])
+            self._images[f"windows-image:{index}"] = index
+        return list(self._images), "ok" if self._images else "body_images_not_found"
 
-        urls: list[str] = []
-        seen: set[str] = set()
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            raw = next(
-                (
-                    str(node.get(key) or "").strip()
-                    for key in ("dataSrc", "dataOriginal", "dataLazy", "src")
-                    if str(node.get(key) or "").strip()
-                ),
-                "",
-            )
-            if not raw or raw.startswith("data:"):
-                continue
-            image_url = urljoin(article_url, raw)
-            host = (urlparse(image_url).hostname or "").lower()
-            if host and not (host.endswith("qpic.cn") or host.endswith("qlogo.cn")):
-                continue
-            if image_url in seen:
-                continue
-            seen.add(image_url)
-            urls.append(image_url)
-            if len(urls) >= max(1, max_images):
-                break
-        return urls, "ok" if urls else "body_images_not_found"
+    @staticmethod
+    def _windows_path(value: str) -> Path:
+        match = re.match(r"^([A-Za-z]):[\\/](.*)$", value)
+        if not match:
+            return Path(value)
+        parts = [part for part in match.group(2).replace("\\", "/").split("/") if part]
+        return Path("/mnt", match.group(1).lower(), *parts)
 
-    def download(self, url: str, referer: str, max_bytes: int) -> bytes | None:
-        """通过带有文章会话的 Chrome 上下文下载正文图片。"""
-        if self._context is None or not url:
+    def download(self, image_ref: str, referer: str, max_bytes: int) -> bytes | None:
+        """执行图片另存为，验证图片后清理本次创建的临时文件。"""
+        if self._windows is None or image_ref not in self._images or self._save_failed:
             return None
+        save_directory: Path | None = None
         try:
-            response = self._context.request.get(
-                url,
-                headers={"Referer": referer} if referer else None,
-                timeout=30_000,
-            )
-            if not response.ok:
+            saved = self._windows.save_image(self._images[image_ref])
+            image_path = self._windows_path(str(saved["file_path"]))
+            directory = image_path.parent
+            if directory.parent.name.lower() != "temp" or not re.fullmatch(
+                r"VideoInfoWechatImages-[A-Za-z0-9]+", directory.name
+            ):
+                raise RuntimeError("浏览器图片未保存到本次临时目录")
+            save_directory = directory
+            if image_path.stat().st_size > max_bytes:
                 return None
-            raw = response.body()
-            if len(raw) > max_bytes:
-                return None
+            raw = image_path.read_bytes()
             with Image.open(io.BytesIO(raw)) as image:
                 image.verify()
                 if image.width < 320 or image.height < 180:
@@ -393,29 +328,21 @@ class _WechatBodyBrowser:
                 if max(image.size) / max(1, min(image.size)) > 4.5:
                     return None
             return raw
-        except Exception:
+        except Exception as exc:
+            self._save_failed = True
+            self._candidate["article_fetch_status"] = "image_save_failed"
+            self._candidate["image_save_error"] = str(exc)
+            print(f"⚠️ 正文图片保存失败：{exc}", file=sys.stderr, flush=True)
             return None
+        finally:
+            if save_directory is not None:
+                shutil.rmtree(save_directory, ignore_errors=True)
 
     def close(self) -> None:
-        # 只关闭脚本自己的标签页，保留 Windows 浏览器和持久配置。
-        # 验证未完成时保留页面，便于用户手动处理后在下次任务复用。
-        if self._page is not None and not self._keep_page:
-            try:
-                self._page.close()
-            except Exception:
-                pass
-        if self._playwright is not None:
-            try:
-                self._playwright.stop()
-            except Exception:
-                pass
+        self._images.clear()
         if self._windows is not None:
             self._windows.close()
-            self._windows = None
-        self._page = None
-        self._context = None
-        self._browser = None
-        self._playwright = None
+
 
 
 def _metadata_text(candidate: dict[str, str]) -> str:
@@ -709,6 +636,7 @@ def search_and_download(
     queries = _query_terms(title, intro, topics, paragraphs)
     if not queries:
         raise ValueError("无法从文稿提取搜索主题")
+    queries = queries[:1]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     if clean:
@@ -754,6 +682,8 @@ def search_and_download(
     candidates: list[tuple[str, dict[str, str]]] = []
     result_sets: list[tuple[str, list[dict[str, str]]]] = []
     search_records: list[dict[str, Any]] = []
+    windows_browser: WindowsBrowser | None = None
+    windows_browser_init_error = ""
     for query in queries:
         found: list[dict[str, str]] = []
         record: dict[str, Any] = {"query": query, "results": []}
@@ -770,15 +700,39 @@ def search_and_download(
         except Exception as exc:
             record["error"] = str(exc)
             print(f"⚠️ 微信公众号搜索失败: {query}: {exc}", file=sys.stderr)
+        if not found:
+            try:
+                if windows_browser is None:
+                    if windows_browser_init_error:
+                        raise RuntimeError(windows_browser_init_error)
+                    windows_browser = WindowsBrowser().start()
+                browser_results = _sanitize_unicode(
+                    windows_browser.search_wechat(query, max(count_per_query, 10))
+                )
+                browser_found = [item for item in browser_results if _candidate_relevance(item, query)]
+                record["windows_browser_results"] = browser_results
+                record["windows_browser_relevant_count"] = len(browser_found)
+                if browser_found:
+                    record["selected_search_source"] = "windows_default_browser"
+                    found = browser_found
+                print(
+                    f"🌐 默认浏览器微信搜索：{query} → {len(browser_results)} 篇，相关 {len(browser_found)} 篇",
+                    flush=True,
+                )
+            except Exception as exc:
+                if windows_browser is None:
+                    windows_browser_init_error = str(exc)
+                record["windows_browser_error"] = str(exc)
+                print(f"⚠️ 默认浏览器搜索失败: {query}: {exc}", file=sys.stderr)
         found.sort(key=lambda item: _candidate_sort_key(item, query), reverse=True)
         result_sets.append((query, found))
 
-    # 按查询词轮询，优先保证不同语义场景各拿到一张图，而不是被第一个
-    # 返回大量结果的通用查询占满。
+    # 只打开排序最靠前的一篇相关公众号文章；从其正文中提取多张图片。
     for offset in range(count_per_query):
         for query, found in result_sets:
             if offset < len(found):
                 candidates.append((query, found[offset]))
+    candidates = candidates[:1]
 
     new_materials: list[dict[str, Any]] = []
     body_browser: _WechatBodyBrowser | None = None
@@ -806,7 +760,7 @@ def search_and_download(
             if use_wechat_body and candidate.get("source") == "wechat" and not body_access_blocked:
                 if body_browser is None and not body_browser_failed:
                     try:
-                        body_browser = _WechatBodyBrowser().start()
+                        body_browser = _WechatBodyBrowser(browser=windows_browser).start()
                     except Exception as exc:
                         body_browser_failed = True
                         candidate["article_fetch_status"] = "windows_browser_unavailable"
@@ -846,7 +800,8 @@ def search_and_download(
                     )
                     if body_raw is not None:
                         downloaded = body_raw, target_url
-                if downloaded is None:
+                is_saved_image = target_url.startswith("windows-image:")
+                if downloaded is None and not is_saved_image:
                     downloaded = _download_image(session, image_candidate, max_bytes)
                 if not downloaded:
                     continue
@@ -867,7 +822,9 @@ def search_and_download(
                         "source_url": candidate.get("article_url") if is_body_image else candidate.get("page_url", ""),
                         "source_search_url": candidate.get("search_url", ""),
                         "article_url": candidate.get("article_url", ""),
-                        "image_url": fetched_url,
+                        "image_url": "" if is_saved_image else fetched_url,
+                        "source_image_index": int(target_url.split(":", 1)[1]) if is_saved_image else None,
+                        "capture_method": "windows_image_save_as" if is_saved_image else "http",
                         "cover_image_url": candidate.get("image_url", "") if is_body_image else "",
                         "title": candidate.get("title", ""),
                         "description": candidate.get("description", ""),
